@@ -63,7 +63,7 @@ class SimulationSessionManagerTest {
 
         sessionManager.stopSession("instance-001");
         Assertions.assertTrue(sessionManager.removeSession("instance-001").isPresent());
-        Assertions.assertTrue(sessionManager.getSession("instance-001").isEmpty());
+        Assertions.assertFalse(sessionManager.getSession("instance-001").isPresent());
     }
 
     /**

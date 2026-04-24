@@ -1,5 +1,7 @@
 package com.szzh.loggerserver.domain.clock;
 
+import lombok.Getter;
+
 import java.util.Objects;
 import java.util.function.LongSupplier;
 
@@ -14,10 +16,13 @@ public class SimulationClock {
 
     private long baseWallClockMillis;
 
+    @Getter
     private double speed = 1.0D;
 
+    @Getter
     private boolean running;
 
+    @Getter
     private boolean initialized;
 
     /**
@@ -102,33 +107,6 @@ public class SimulationClock {
         }
         long elapsedMillis = wallClockSupplier.getAsLong() - baseWallClockMillis;
         return baseSimTimeMillis + (long) (elapsedMillis * speed);
-    }
-
-    /**
-     * 获取当前倍率。
-     *
-     * @return 当前倍率。
-     */
-    public synchronized double getSpeed() {
-        return speed;
-    }
-
-    /**
-     * 判断时钟是否处于运行状态。
-     *
-     * @return 是否运行中。
-     */
-    public synchronized boolean isRunning() {
-        return running;
-    }
-
-    /**
-     * 获取时钟是否已初始化。
-     *
-     * @return 是否已初始化。
-     */
-    public synchronized boolean isInitialized() {
-        return initialized;
     }
 
     /**

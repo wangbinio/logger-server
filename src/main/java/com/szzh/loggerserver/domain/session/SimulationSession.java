@@ -1,6 +1,9 @@
 package com.szzh.loggerserver.domain.session;
 
 import com.szzh.loggerserver.domain.clock.SimulationClock;
+import lombok.AccessLevel;
+import lombok.Getter;
+import lombok.Setter;
 
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicLong;
@@ -8,6 +11,7 @@ import java.util.concurrent.atomic.AtomicLong;
 /**
  * 仿真实例会话。
  */
+@Getter
 public class SimulationSession {
 
     private final String instanceId;
@@ -16,10 +20,13 @@ public class SimulationSession {
 
     private final long createdAtMillis;
 
+    @Getter(AccessLevel.NONE)
     private final AtomicLong receivedMessageCount = new AtomicLong();
 
+    @Getter(AccessLevel.NONE)
     private final AtomicLong writtenRecordCount = new AtomicLong();
 
+    @Getter(AccessLevel.NONE)
     private final AtomicLong droppedMessageCount = new AtomicLong();
 
     private volatile SimulationSessionState state = SimulationSessionState.PREPARING;
@@ -30,8 +37,10 @@ public class SimulationSession {
 
     private volatile long lastErrorTimeMillis;
 
+    @Setter
     private volatile Object broadcastConsumerHandle;
 
+    @Setter
     private volatile Object situationConsumerHandle;
 
     /**
@@ -104,74 +113,11 @@ public class SimulationSession {
     }
 
     /**
-     * 设置实例控制消费者句柄。
-     *
-     * @param broadcastConsumerHandle 控制消费者句柄。
-     */
-    public void setBroadcastConsumerHandle(Object broadcastConsumerHandle) {
-        this.broadcastConsumerHandle = broadcastConsumerHandle;
-    }
-
-    /**
-     * 设置实例态势消费者句柄。
-     *
-     * @param situationConsumerHandle 态势消费者句柄。
-     */
-    public void setSituationConsumerHandle(Object situationConsumerHandle) {
-        this.situationConsumerHandle = situationConsumerHandle;
-    }
-
-    /**
-     * 获取仿真实例 ID。
-     *
-     * @return 仿真实例 ID。
-     */
-    public String getInstanceId() {
-        return instanceId;
-    }
-
-    /**
-     * 获取仿真时钟。
-     *
-     * @return 仿真时钟。
-     */
-    public SimulationClock getSimulationClock() {
-        return simulationClock;
-    }
-
-    /**
-     * 获取当前状态。
-     *
-     * @return 当前状态。
-     */
-    public SimulationSessionState getState() {
-        return state;
-    }
-
-    /**
-     * 获取创建时间。
-     *
-     * @return 创建时间毫秒值。
-     */
-    public long getCreatedAtMillis() {
-        return createdAtMillis;
-    }
-
-    /**
-     * 获取最后一条消息时间。
-     *
-     * @return 最后消息时间毫秒值。
-     */
-    public long getLastMessageTimeMillis() {
-        return lastMessageTimeMillis;
-    }
-
-    /**
      * 获取收到消息计数。
      *
      * @return 收到消息计数。
      */
-    public long getReceivedMessageCount() {
+    public long receivedMessageCount() {
         return receivedMessageCount.get();
     }
 
@@ -180,7 +126,7 @@ public class SimulationSession {
      *
      * @return 写入记录计数。
      */
-    public long getWrittenRecordCount() {
+    public long writtenRecordCount() {
         return writtenRecordCount.get();
     }
 
@@ -189,44 +135,8 @@ public class SimulationSession {
      *
      * @return 丢弃消息计数。
      */
-    public long getDroppedMessageCount() {
+    public long droppedMessageCount() {
         return droppedMessageCount.get();
-    }
-
-    /**
-     * 获取最后异常信息。
-     *
-     * @return 最后异常信息。
-     */
-    public String getLastErrorMessage() {
-        return lastErrorMessage;
-    }
-
-    /**
-     * 获取最后异常时间。
-     *
-     * @return 最后异常时间毫秒值。
-     */
-    public long getLastErrorTimeMillis() {
-        return lastErrorTimeMillis;
-    }
-
-    /**
-     * 获取控制消费者句柄。
-     *
-     * @return 控制消费者句柄。
-     */
-    public Object getBroadcastConsumerHandle() {
-        return broadcastConsumerHandle;
-    }
-
-    /**
-     * 获取态势消费者句柄。
-     *
-     * @return 态势消费者句柄。
-     */
-    public Object getSituationConsumerHandle() {
-        return situationConsumerHandle;
     }
 
     /**
