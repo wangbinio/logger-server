@@ -11,7 +11,7 @@
 | Phase 00 | 骨架清理与基础配置 | 完成配置收敛、目录骨架和公共常量，建立后续开发基线 | 无 | 已完成 | [phase-00.md](E:\project\5y\logger-server\plan\002-详细开发步骤\phases\phase-00.md) |
 | Phase 01 | 核心领域模型 | 实现会话状态机、仿真时钟和会话管理器 | Phase 00 | 已完成 | [phase-01.md](E:\project\5y\logger-server\plan\002-详细开发步骤\phases\phase-01.md) |
 | Phase 02 | TDengine 基础设施 | 建立 WebSocket 数据源、建表服务和写入服务 | Phase 00, Phase 01 | 已完成 | [phase-02.md](E:\project\5y\logger-server\plan\002-详细开发步骤\phases\phase-02.md) |
-| Phase 03 | RocketMQ 动态订阅 | 实现全局监听、实例级订阅管理与消息处理器 | Phase 00, Phase 01 | 未开始 | [phase-03.md](E:\project\5y\logger-server\plan\002-详细开发步骤\phases\phase-03.md) |
+| Phase 03 | RocketMQ 动态订阅 | 实现全局监听、实例级订阅管理与消息处理器 | Phase 00, Phase 01 | 已完成 | [phase-03.md](E:\project\5y\logger-server\plan\002-详细开发步骤\phases\phase-03.md) |
 | Phase 04 | 业务流程串联 | 打通创建、启动、暂停、继续、停止和态势入库主链路 | Phase 01, Phase 02, Phase 03 | 未开始 | [phase-04.md](E:\project\5y\logger-server\plan\002-详细开发步骤\phases\phase-04.md) |
 | Phase 05 | 测试、日志与交付收尾 | 完成 TDD 回补、异常处理、日志指标和交付校验 | Phase 00, Phase 01, Phase 02, Phase 03, Phase 04 | 未开始 | [phase-05.md](E:\project\5y\logger-server\plan\002-详细开发步骤\phases\phase-05.md) |
 
@@ -20,7 +20,8 @@
 - Phase 00 已完成：`pom.xml` 已切换到 `logger-server` + Spring JDBC + RocketMQ + TDengine Java Connector 的基础依赖，配置文件已完成收敛，基础常量类与配置类已建立。
 - Phase 01 已完成：`SimulationClock`、`SimulationSessionState`、`SimulationSession`、`SimulationSessionManager` 已落地，且主类已通过 `javac` 静态编译校验。
 - Phase 02 已完成：`SituationRecordCommand`、`TdengineConstants`、`TdengineSchemaService`、`TdengineWriteService` 已落地，并通过 Maven 测试验证。
-- RocketMQ 消费链路和业务流程编排仍未开始编码。
+- Phase 03 已完成：`RocketMqConsumerFactory`、`TopicSubscriptionManager`、`GlobalBroadcastListener`、`InstanceBroadcastMessageHandler`、`SituationMessageHandler` 已落地，订阅管理测试已补齐。
+- Phase 04 的业务流程编排仍未开始编码。
 
 ## 4. 阶段依赖关系图
 

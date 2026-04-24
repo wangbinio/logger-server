@@ -77,5 +77,7 @@ public class LoggerServerProperties {
         private String globalConsumerGroup = "logger-global-consumer";
 
         private String instanceConsumerGroupPrefix = "logger-instance";
+
+        private boolean enableGlobalListener = true;
     }
 }
