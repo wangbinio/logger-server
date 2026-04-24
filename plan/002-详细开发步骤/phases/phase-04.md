@@ -16,19 +16,19 @@
 
 ## 待办步骤
 
-- [ ] 实现 `TaskCreatePayload`
+- [x] 实现 `TaskCreatePayload`
   说明：解析全局创建消息中的 `instanceId` 等字段。
-- [ ] 实现 `SimulationLifecycleService`
+- [x] 实现 `SimulationLifecycleService`
   说明：处理实例创建、资源初始化、实例停止和资源回收。
-- [ ] 实现 `SimulationControlService`
+- [x] 实现 `SimulationControlService`
   说明：承接启动、暂停、继续，驱动时钟和状态迁移。
-- [ ] 实现 `SituationRecordService`
+- [x] 实现 `SituationRecordService`
   说明：完成态势消息接收、状态校验、仿真时间计算和写库委派。
-- [ ] 串联 `GlobalBroadcastListener` 与生命周期服务
+- [x] 串联 `GlobalBroadcastListener` 与生命周期服务
   说明：保证创建时会建会话、建超表、订阅实例 topic；停止时取消订阅并释放资源。
-- [ ] 串联实例控制与态势处理器
+- [x] 串联实例控制与态势处理器
   说明：保证只有 `RUNNING` 状态才会真正写库，其余状态走丢弃计数。
-- [ ] 编写服务层测试
+- [x] 编写服务层测试
   说明：覆盖创建、重复创建、暂停、继续、停止、无会话态势消息、非运行态态势消息等场景。
 
 ## 预期完成标志
@@ -38,4 +38,4 @@
 
 ## 疑问或待澄清
 
-当前无阻塞性疑问。
+当前阶段代码已完成。`TaskCreatePayload`、`SimulationLifecycleService`、`SimulationControlService`、`SituationRecordService` 与对应测试均已落地，且已在 Java 8 环境下执行 `mvn -q test` 通过。下一步进入 Phase 05，补齐日志、异常处理、集成测试和交付收尾。
