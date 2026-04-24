@@ -1,0 +1,25 @@
+spring:
+  application:
+    name: logger-server
+  profiles:
+    active: local
+
+logging:
+  level:
+    root: INFO
+    com.szzh.loggerserver: INFO
+
+logger-server:
+  tdengine:
+    maximum-pool-size: 4
+    connection-timeout-ms: 30000
+  protocol:
+    max-payload-size: 102400
+  session:
+    cleanup-delay-seconds: 30
+  write:
+    retry-times: 3
+    batch-size: 500
+  rocketmq:
+    global-consumer-group: logger-global-consumer
+    instance-consumer-group-prefix: logger-instance

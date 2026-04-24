@@ -1,0 +1,12 @@
+rocketmq:
+  name-server: 127.0.0.1:9876
+
+logger-server:
+  tdengine:
+    jdbc-url: jdbc:TAOS-WS://127.0.0.1:6041/logger?timezone=UTC-8&charset=utf-8&varcharAsString=true
+    username: root
+    password: taosdata
+    driver-class-name: com.taosdata.jdbc.ws.WebSocketDriver
+  rocketmq:
+    global-consumer-group: logger-global-consumer-local
+    instance-consumer-group-prefix: logger-instance-local
