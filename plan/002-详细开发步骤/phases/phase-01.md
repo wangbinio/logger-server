@@ -15,17 +15,17 @@
 
 ## 待办步骤
 
-- [ ] 定义 `SimulationSessionState`
+- [x] 定义 `SimulationSessionState`
   说明：明确 `PREPARING`、`READY`、`RUNNING`、`PAUSED`、`STOPPED`、`FAILED` 六种状态。
-- [ ] 实现 `SimulationClock`
+- [x] 实现 `SimulationClock`
   说明：封装启动、暂停、继续、倍速结算逻辑，保证状态切换和时间计算可单测。
-- [ ] 实现 `SimulationSession`
+- [x] 实现 `SimulationSession`
   说明：收敛 `instanceId`、时钟、状态、订阅句柄引用、统计字段和异常信息。
-- [ ] 实现 `SimulationSessionManager`
+- [x] 实现 `SimulationSessionManager`
   说明：负责会话创建、查询、停止、移除及幂等控制。
-- [ ] 编写 `SimulationClockTest`
+- [x] 编写 `SimulationClockTest`
   说明：先覆盖启动、暂停、继续和倍率调整的失败/成功场景。
-- [ ] 编写 `SimulationSessionManagerTest`
+- [x] 编写 `SimulationSessionManagerTest`
   说明：覆盖重复创建、重复停止、状态变迁与并发安全的基础场景。
 
 ## 预期完成标志
