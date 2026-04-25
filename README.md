@@ -1,83 +1,145 @@
 # logger-server
 
-`logger-server` 是一个基于 Spring Boot 的数据记录服务，用于订阅 RocketMQ 中的仿真消息，并将态势数据写入 TDengine。
+`logger-server` 是一个基于 Spring Boot 的仿真消息记录服务。它从 RocketMQ 订阅仿真实例的控制消息和态势消息，维护实例生命周期与仿真时间，并将运行态势按实例写入 TDengine。
 
-当前代码基线已完成 [总体设计](E:\project\5y\logger-server\plan\001-总体设计\final.md)、[详细开发步骤](E:\project\5y\logger-server\plan\002-详细开发步骤\development-steps.md) 以及 Phase 00-05 中定义的主体实现，覆盖会话管理、仿真时钟、RocketMQ 动态订阅、TDengine 建表写入、主链路编排、异常处理、日志指标与测试闭环。
+当前发布版本：`v0.1`
 
-## 项目目标
+## 功能范围
 
-- 启动后固定订阅 `broadcast-global`
-- 根据任务创建消息动态订阅 `broadcast-{instanceId}` 和 `situation-{instanceId}`
-- 维护支持启动、暂停、继续、后续倍速扩展的仿真时间
-- 将态势消息按实例写入 TDengine
+- 固定监听全局广播主题 `broadcast-global`。
+- 根据任务创建消息动态订阅 `broadcast-{instanceId}` 和 `situation-{instanceId}`。
+- 支持实例创建、启动、暂停、继续和停止。
+- 维护实例级仿真时钟，态势写入时记录当前仿真时间。
+- 按实例创建 TDengine 超级表，并按 `messageType`、`messageCode`、`senderId` 写入子表。
+- 支持协议消息类型和消息码通过 YAML 配置外置。
+- 提供单元测试、主流程集成测试和可选真实环境完整测试。
 
 ## 技术栈
 
 - Java 8
-- Spring Boot 2.7
-- RocketMQ
-- TDengine Java Connector
-- Spring JDBC
+- Spring Boot 2.7.12
+- RocketMQ Spring Boot Starter 2.2.3
+- TDengine Java Connector 3.8.0
+- Spring JDBC 与 HikariCP
 - Lombok
+- JUnit 5 与 Mockito
 
-## 当前进度
+## 架构文档
 
-- 已完成 `Phase 00`：骨架清理与基础配置
-- 已完成 `Phase 01`：核心领域模型
-- 已完成 `Phase 02`：TDengine 基础设施
-- 已完成 `Phase 03`：RocketMQ 动态订阅
-- 已完成 `Phase 04`：业务流程串联
-- 已完成 `Phase 05`：测试、日志与交付收尾
+完整架构、消息流、状态迁移、TDengine 数据模型和测试策略见 [ARCHITECTURE.md](ARCHITECTURE.md)。
 
-## 当前状态
+## 目录结构
 
-- 已具备 `broadcast-global` 固定监听、`broadcast-{instanceId}` / `situation-{instanceId}` 实例级动态订阅能力
-- 已实现 `SimulationSession` + `SimulationClock` 的实例状态与仿真时间管理
-- 已实现按实例创建 TDengine 超表、按消息维度写入子表
-- 已完成创建、启动、暂停、继续、停止、态势入库的主链路服务编排
-- 已补齐协议解析、领域服务、订阅管理与主流程集成测试
-- 当前设计一致性审阅结果见 [todo-12-设计一致性审阅.md](E:\project\5y\logger-server\tasks\todo-12-设计一致性审阅.md)
+```text
+src/main/java/com/szzh/loggerserver
+├── config              # 配置绑定、RocketMQ 消费者工厂、TDengine 数据源
+├── domain              # 仿真时钟、会话、状态机
+├── model               # DTO 与写库命令
+├── mq                  # RocketMQ 监听器、动态订阅、入口端口
+├── service             # 生命周期、控制、态势记录、TDengine 编排
+├── support             # 常量、异常、指标
+└── util                # 协议解析、JSON 工具
+```
 
-## 目录说明
+## 配置文件
 
-- `src/main/java/com/szzh/loggerserver`：主代码目录
-- `src/main/resources`：应用配置
-- `src/test/java/com/szzh/loggerserver`：测试代码
-- `plan/001-总体设计`：总体设计文档
-- `plan/002-详细开发步骤`：阶段开发计划文档
-- `tasks`：任务执行记录
+源码只维护两份 YAML：
 
-## 配置说明
+- `src/main/resources/application.yml`：通用配置，包含默认 profile、日志级别、协议消息码、会话与写入参数。
+- `src/main/resources/application-dev.yml`：开发环境配置，包含 RocketMQ nameserver、TDengine JDBC 和消费者组配置。
 
-当前默认使用本地配置文件：
+默认激活 `dev` profile：
 
-- [application.yml](E:\project\5y\logger-server\src\main\resources\application.yml)
-- [application-local.yml](E:\project\5y\logger-server\src\main\resources\application-local.yml)
+```yaml
+spring:
+  profiles:
+    active: dev
+```
 
-其中已收敛为当前阶段最小配置，重点包括：
+关键配置项：
 
-- `rocketmq.name-server`
-- `logger-server.tdengine.*`
-- `logger-server.rocketmq.*`
-- `logger-server.protocol.*`
-- `logger-server.session.*`
-- `logger-server.write.*`
+```yaml
+rocketmq:
+  name-server: 192.168.233.109:9876
 
-## 主要文档
+logger-server:
+  tdengine:
+    jdbc-url: jdbc:TAOS-WS://127.0.0.1:6041/logger?timezone=UTC-8&charset=utf-8&varcharAsString=true
+    username: root
+    password: taosdata
+    driver-class-name: com.taosdata.jdbc.ws.WebSocketDriver
+  rocketmq:
+    global-consumer-group: logger-global-consumer
+    instance-consumer-group-prefix: logger-instance
+```
 
-- 总体设计：[final.md](E:\project\5y\logger-server\plan\001-总体设计\final.md)
-- 开发步骤索引：[development-steps.md](E:\project\5y\logger-server\plan\002-详细开发步骤\development-steps.md)
-- 分阶段计划：
-  - [phase-00.md](E:\project\5y\logger-server\plan\002-详细开发步骤\phases\phase-00.md)
-  - [phase-01.md](E:\project\5y\logger-server\plan\002-详细开发步骤\phases\phase-01.md)
-  - [phase-02.md](E:\project\5y\logger-server\plan\002-详细开发步骤\phases\phase-02.md)
-  - [phase-03.md](E:\project\5y\logger-server\plan\002-详细开发步骤\phases\phase-03.md)
-  - [phase-04.md](E:\project\5y\logger-server\plan\002-详细开发步骤\phases\phase-04.md)
-  - [phase-05.md](E:\project\5y\logger-server\plan\002-详细开发步骤\phases\phase-05.md)
+协议消息码配置位于 `logger-server.protocol.messages`：
 
-## 开发说明
+```yaml
+logger-server:
+  protocol:
+    messages:
+      global:
+        message-type: 0
+        create-message-code: 0
+        stop-message-code: 1
+      instance:
+        message-type: 1100
+        start-message-code: 1
+        pause-message-code: 5
+        resume-message-code: 6
+```
 
-- 协议解析直接复用现有 `ProtocolData` 和 `ProtocolMessageUtil`
-- TDengine 采用官方 Java Connector 的 WebSocket 路线
-- 编码阶段遵循 TDD：先写失败测试，再补实现
-- 当前默认以 Java 8 作为目标运行环境
+说明：现有测试代码中仍有历史 `application-local.yml` 读取路径。构建时会在 `process-test-resources` 阶段把 `application-dev.yml` 复制到测试输出目录并命名为 `application-local.yml`，源码中不再维护 `application-local.yml`。
+
+## 构建与测试
+
+执行全部测试：
+
+```powershell
+mvn -q test
+```
+
+打包：
+
+```powershell
+mvn -q package
+```
+
+构建产物：
+
+```text
+target/logger-server-0.1.0.jar
+```
+
+可选真实环境完整测试默认不运行。需要 RocketMQ 与 TDengine 可用时，可显式开启：
+
+```powershell
+mvn -q -Dlogger.real-env.test=true -Dtest=RealEnvironmentFullFlowTest test
+```
+
+## 运行
+
+确认 RocketMQ 与 TDengine 配置后执行：
+
+```powershell
+java -jar target/logger-server-0.1.0.jar
+```
+
+使用其他 profile 或外部配置时，可通过 Spring Boot 标准参数覆盖：
+
+```powershell
+java -jar target/logger-server-0.1.0.jar --spring.profiles.active=dev
+```
+
+## 消息主题
+
+| Topic | 说明 |
+| --- | --- |
+| `broadcast-global` | 全局任务创建与停止消息。 |
+| `broadcast-{instanceId}` | 指定实例的启动、暂停、继续控制消息。 |
+| `situation-{instanceId}` | 指定实例的态势数据消息。 |
+
+## 发布信息
+
+`v0.1` 是第一个可运行闭环版本，包含 RocketMQ 接入、动态订阅、会话管理、仿真时钟、TDengine 写入、配置外置与测试闭环。

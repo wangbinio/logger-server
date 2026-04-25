@@ -15,7 +15,7 @@
 
     <groupId>com.szzh</groupId>
     <artifactId>logger-server</artifactId>
-    <version>1.0.0-SNAPSHOT</version>
+    <version>0.1.0</version>
     <name>logger-server</name>
     <description>RocketMQ to TDengine logger service</description>
     <packaging>jar</packaging>
