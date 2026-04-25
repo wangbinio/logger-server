@@ -2,8 +2,11 @@ package com.szzh.loggerserver.service;
 
 import com.szzh.loggerserver.config.LoggerServerProperties;
 import com.szzh.loggerserver.model.dto.SituationRecordCommand;
+import com.szzh.loggerserver.support.exception.BusinessException;
 import com.szzh.loggerserver.support.constant.TdengineConstants;
 import com.taosdata.jdbc.ws.TSWSPreparedStatement;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.PreparedStatementSetter;
@@ -22,6 +25,8 @@ import java.util.Objects;
  */
 @Service
 public class TdengineWriteService {
+
+    private static final Logger log = LoggerFactory.getLogger(TdengineWriteService.class);
 
     private final JdbcTemplate jdbcTemplate;
 
@@ -76,9 +81,17 @@ public class TdengineWriteService {
                 return;
             } catch (RuntimeException exception) {
                 lastException = exception;
+                log.warn("result=write_retry_failed instanceId={} topic=- messageType={} messageCode={} senderId={} simtime={} costMs=-1 attempt={} reason={}",
+                        validatedCommand.getInstanceId(),
+                        validatedCommand.getMessageType(),
+                        validatedCommand.getMessageCode(),
+                        validatedCommand.getSenderId(),
+                        validatedCommand.getSimTime(),
+                        attempt + 1,
+                        exception.getMessage());
             }
         }
-        throw lastException;
+        throw BusinessException.tdengineWrite("TDengine 单条写入失败", lastException);
     }
 
     /**
@@ -104,7 +117,7 @@ public class TdengineWriteService {
             taosPrepareStatement.columnDataExecuteBatch();
             taosPrepareStatement.columnDataCloseBatch();
         } catch (SQLException exception) {
-            throw new IllegalStateException("TDengine stmt 批量写入失败", exception);
+            throw BusinessException.tdengineWrite("TDengine stmt 批量写入失败", exception);
         }
     }
 

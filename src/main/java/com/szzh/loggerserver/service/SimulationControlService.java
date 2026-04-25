@@ -4,7 +4,11 @@ import com.szzh.loggerserver.domain.session.SimulationSession;
 import com.szzh.loggerserver.domain.session.SimulationSessionManager;
 import com.szzh.loggerserver.domain.session.SimulationSessionState;
 import com.szzh.loggerserver.mq.SimulationControlCommandPort;
+import com.szzh.loggerserver.support.metric.LoggerMetrics;
 import com.szzh.loggerserver.util.ProtocolData;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.util.Objects;
@@ -16,7 +20,11 @@ import java.util.Optional;
 @Service
 public class SimulationControlService implements SimulationControlCommandPort {
 
+    private static final Logger log = LoggerFactory.getLogger(SimulationControlService.class);
+
     private final SimulationSessionManager sessionManager;
+
+    private final LoggerMetrics loggerMetrics;
 
     /**
      * 创建仿真控制服务。
@@ -24,7 +32,19 @@ public class SimulationControlService implements SimulationControlCommandPort {
      * @param sessionManager 会话管理器。
      */
     public SimulationControlService(SimulationSessionManager sessionManager) {
+        this(sessionManager, new LoggerMetrics());
+    }
+
+    /**
+     * 创建仿真控制服务。
+     *
+     * @param sessionManager 会话管理器。
+     * @param loggerMetrics 日志指标封装。
+     */
+    @Autowired
+    public SimulationControlService(SimulationSessionManager sessionManager, LoggerMetrics loggerMetrics) {
         this.sessionManager = Objects.requireNonNull(sessionManager, "sessionManager 不能为空");
+        this.loggerMetrics = Objects.requireNonNull(loggerMetrics, "loggerMetrics 不能为空");
     }
 
     /**
@@ -37,10 +57,12 @@ public class SimulationControlService implements SimulationControlCommandPort {
     public void handleStart(String instanceId, ProtocolData protocolData) {
         Optional<SimulationSession> sessionOptional = sessionManager.getSession(instanceId);
         if (!sessionOptional.isPresent()) {
+            logStateIgnore("ignored_missing_start", instanceId, protocolData, "MISSING");
             return;
         }
         SimulationSession session = sessionOptional.get();
         if (session.getState() == SimulationSessionState.RUNNING) {
+            logStateIgnore("ignored_duplicate_start", instanceId, protocolData, session.getState().name());
             return;
         }
         if (session.getState() == SimulationSessionState.READY) {
@@ -53,11 +75,20 @@ public class SimulationControlService implements SimulationControlCommandPort {
                     session.getSimulationClock().start();
                 }
             });
+            log.info("result=start_success instanceId={} topic=- messageType={} messageCode={} senderId={} simtime={} sessionState={}",
+                    instanceId,
+                    protocolData.getMessageType(),
+                    protocolData.getMessageCode(),
+                    protocolData.getSenderId(),
+                    session.getSimulationClock().currentSimTimeMillis(),
+                    session.getState());
             return;
         }
         if (session.getState() == SimulationSessionState.PAUSED) {
             handleResume(instanceId, protocolData);
+            return;
         }
+        logStateIgnore("ignored_invalid_start_state", instanceId, protocolData, session.getState().name());
     }
 
     /**
@@ -70,10 +101,12 @@ public class SimulationControlService implements SimulationControlCommandPort {
     public void handlePause(String instanceId, ProtocolData protocolData) {
         Optional<SimulationSession> sessionOptional = sessionManager.getSession(instanceId);
         if (!sessionOptional.isPresent()) {
+            logStateIgnore("ignored_missing_pause", instanceId, protocolData, "MISSING");
             return;
         }
         SimulationSession session = sessionOptional.get();
         if (session.getState() != SimulationSessionState.RUNNING) {
+            logStateIgnore("ignored_invalid_pause_state", instanceId, protocolData, session.getState().name());
             return;
         }
         executeTransition(session, SimulationSessionState.PAUSED, new SessionAction() {
@@ -81,10 +114,17 @@ public class SimulationControlService implements SimulationControlCommandPort {
              * 执行时钟暂停。
              */
             @Override
-            public void apply() {
-                session.getSimulationClock().pause();
-            }
-        });
+                public void apply() {
+                    session.getSimulationClock().pause();
+                }
+            });
+        log.info("result=pause_success instanceId={} topic=- messageType={} messageCode={} senderId={} simtime={} sessionState={}",
+                instanceId,
+                protocolData.getMessageType(),
+                protocolData.getMessageCode(),
+                protocolData.getSenderId(),
+                session.getSimulationClock().currentSimTimeMillis(),
+                session.getState());
     }
 
     /**
@@ -97,13 +137,16 @@ public class SimulationControlService implements SimulationControlCommandPort {
     public void handleResume(String instanceId, ProtocolData protocolData) {
         Optional<SimulationSession> sessionOptional = sessionManager.getSession(instanceId);
         if (!sessionOptional.isPresent()) {
+            logStateIgnore("ignored_missing_resume", instanceId, protocolData, "MISSING");
             return;
         }
         SimulationSession session = sessionOptional.get();
         if (session.getState() == SimulationSessionState.RUNNING) {
+            logStateIgnore("ignored_duplicate_resume", instanceId, protocolData, session.getState().name());
             return;
         }
         if (session.getState() != SimulationSessionState.PAUSED) {
+            logStateIgnore("ignored_invalid_resume_state", instanceId, protocolData, session.getState().name());
             return;
         }
         executeTransition(session, SimulationSessionState.RUNNING, new SessionAction() {
@@ -111,10 +154,17 @@ public class SimulationControlService implements SimulationControlCommandPort {
              * 执行时钟恢复。
              */
             @Override
-            public void apply() {
-                session.getSimulationClock().resume();
-            }
-        });
+                public void apply() {
+                    session.getSimulationClock().resume();
+                }
+            });
+        log.info("result=resume_success instanceId={} topic=- messageType={} messageCode={} senderId={} simtime={} sessionState={}",
+                instanceId,
+                protocolData.getMessageType(),
+                protocolData.getMessageCode(),
+                protocolData.getSenderId(),
+                session.getSimulationClock().currentSimTimeMillis(),
+                session.getState());
     }
 
     /**
@@ -134,6 +184,28 @@ public class SimulationControlService implements SimulationControlCommandPort {
             session.recordFailure(exception.getMessage());
             throw exception;
         }
+    }
+
+    /**
+     * 记录状态忽略日志和指标。
+     *
+     * @param result 处理结果。
+     * @param instanceId 实例 ID。
+     * @param protocolData 协议数据。
+     * @param sessionState 会话状态。
+     */
+    private void logStateIgnore(String result,
+                                String instanceId,
+                                ProtocolData protocolData,
+                                String sessionState) {
+        loggerMetrics.recordStateViolation();
+        log.info("result={} instanceId={} topic=- messageType={} messageCode={} senderId={} simtime=-1 sessionState={}",
+                result,
+                instanceId,
+                protocolData.getMessageType(),
+                protocolData.getMessageCode(),
+                protocolData.getSenderId(),
+                sessionState);
     }
 
     /**

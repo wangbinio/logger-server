@@ -1,5 +1,6 @@
 package com.szzh.loggerserver.model.dto;
 
+import com.szzh.loggerserver.support.exception.BusinessException;
 import com.szzh.loggerserver.util.JsonUtil;
 import com.szzh.loggerserver.util.ProtocolData;
 import lombok.Builder;
@@ -47,10 +48,14 @@ public class TaskCreatePayload {
      */
     public static TaskCreatePayload fromRawData(byte[] rawData) {
         if (rawData == null || rawData.length == 0) {
-            throw new IllegalArgumentException("rawData 不能为空");
+            throw BusinessException.state("创建消息载荷不能为空");
         }
-        return TaskCreatePayload.builder()
-                .instanceId(JsonUtil.readRequiredText(rawData, "instanceId"))
-                .build();
+        try {
+            return TaskCreatePayload.builder()
+                    .instanceId(JsonUtil.readRequiredText(rawData, "instanceId"))
+                    .build();
+        } catch (IllegalArgumentException exception) {
+            throw BusinessException.state("创建消息缺少合法 instanceId");
+        }
     }
 }

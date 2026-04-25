@@ -1,6 +1,9 @@
 package com.szzh.loggerserver.mq;
 
+import com.szzh.loggerserver.support.exception.BusinessException;
+import com.szzh.loggerserver.support.exception.ProtocolParseException;
 import com.szzh.loggerserver.support.constant.MessageConstants;
+import com.szzh.loggerserver.support.metric.LoggerMetrics;
 import com.szzh.loggerserver.util.ProtocolData;
 import com.szzh.loggerserver.util.ProtocolMessageUtil;
 import org.apache.rocketmq.common.message.MessageExt;
@@ -21,6 +24,8 @@ public class InstanceBroadcastMessageHandler {
 
     private SimulationControlCommandPort simulationControlCommandPort;
 
+    private LoggerMetrics loggerMetrics = new LoggerMetrics();
+
     /**
      * 创建实例级控制消息处理器。
      */
@@ -37,6 +42,18 @@ public class InstanceBroadcastMessageHandler {
     }
 
     /**
+     * 创建实例级控制消息处理器。
+     *
+     * @param simulationControlCommandPort 控制命令委派端口。
+     * @param loggerMetrics 指标封装。
+     */
+    public InstanceBroadcastMessageHandler(SimulationControlCommandPort simulationControlCommandPort,
+                                           LoggerMetrics loggerMetrics) {
+        this.simulationControlCommandPort = simulationControlCommandPort;
+        this.loggerMetrics = loggerMetrics == null ? new LoggerMetrics() : loggerMetrics;
+    }
+
+    /**
      * 注入控制命令委派端口。
      *
      * @param simulationControlCommandPort 控制命令委派端口。
@@ -47,34 +64,76 @@ public class InstanceBroadcastMessageHandler {
     }
 
     /**
+     * 注入日志指标封装。
+     *
+     * @param loggerMetrics 日志指标封装。
+     */
+    @Autowired(required = false)
+    public void setLoggerMetrics(LoggerMetrics loggerMetrics) {
+        this.loggerMetrics = loggerMetrics == null ? new LoggerMetrics() : loggerMetrics;
+    }
+
+    /**
      * 处理实例级控制消息。
      *
      * @param instanceId 实例 ID。
      * @param messageExt RocketMQ 原始消息。
      */
     public void handle(String instanceId, MessageExt messageExt) {
-        ProtocolData protocolData = parse(messageExt);
-        if (protocolData == null || !MessageConstants.isInstanceControlMessage(protocolData.getMessageType())) {
+        ProtocolData protocolData;
+        try {
+            protocolData = parse(messageExt);
+        } catch (ProtocolParseException exception) {
+            loggerMetrics.recordProtocolParseFailure();
+            log.warn("result=protocol_parse_failed instanceId={} topic={} messageType=-1 messageCode=-1 senderId=-1 simtime=-1 reason={}",
+                    instanceId,
+                    messageExt.getTopic(),
+                    exception.getMessage());
+            return;
+        }
+        if (!MessageConstants.isInstanceControlMessage(protocolData.getMessageType())) {
             return;
         }
         if (simulationControlCommandPort == null) {
-            log.debug("实例控制命令端口尚未接入，instanceId={}", instanceId);
+            log.debug("result=port_missing instanceId={} topic={} messageType={} messageCode={} senderId={} simtime=-1",
+                    instanceId,
+                    messageExt.getTopic(),
+                    protocolData.getMessageType(),
+                    protocolData.getMessageCode(),
+                    protocolData.getSenderId());
             return;
         }
-        switch (protocolData.getMessageCode()) {
-            case MessageConstants.INSTANCE_START_MESSAGE_CODE:
-                simulationControlCommandPort.handleStart(instanceId, protocolData);
-                return;
-            case MessageConstants.INSTANCE_PAUSE_MESSAGE_CODE:
-                simulationControlCommandPort.handlePause(instanceId, protocolData);
-                return;
-            case MessageConstants.INSTANCE_RESUME_MESSAGE_CODE:
-                simulationControlCommandPort.handleResume(instanceId, protocolData);
-                return;
-            default:
-                log.debug("忽略未知实例控制消息，instanceId={}, messageCode={}",
-                        instanceId,
-                        protocolData.getMessageCode());
+        try {
+            switch (protocolData.getMessageCode()) {
+                case MessageConstants.INSTANCE_START_MESSAGE_CODE:
+                    simulationControlCommandPort.handleStart(instanceId, protocolData);
+                    return;
+                case MessageConstants.INSTANCE_PAUSE_MESSAGE_CODE:
+                    simulationControlCommandPort.handlePause(instanceId, protocolData);
+                    return;
+                case MessageConstants.INSTANCE_RESUME_MESSAGE_CODE:
+                    simulationControlCommandPort.handleResume(instanceId, protocolData);
+                    return;
+                default:
+                    loggerMetrics.recordStateViolation();
+                    log.debug("result=ignored_unknown_message instanceId={} topic={} messageType={} messageCode={} senderId={} simtime=-1",
+                            instanceId,
+                            messageExt.getTopic(),
+                            protocolData.getMessageType(),
+                            protocolData.getMessageCode(),
+                            protocolData.getSenderId());
+            }
+        } catch (BusinessException exception) {
+            logByBusinessException(instanceId, messageExt, protocolData, exception);
+        } catch (RuntimeException exception) {
+            log.error("result=unexpected_exception instanceId={} topic={} messageType={} messageCode={} senderId={} simtime=-1 reason={}",
+                    instanceId,
+                    messageExt.getTopic(),
+                    protocolData.getMessageType(),
+                    protocolData.getMessageCode(),
+                    protocolData.getSenderId(),
+                    exception.getMessage(),
+                    exception);
         }
     }
 
@@ -86,10 +145,40 @@ public class InstanceBroadcastMessageHandler {
      */
     private ProtocolData parse(MessageExt messageExt) {
         Objects.requireNonNull(messageExt, "messageExt 不能为空");
-        ProtocolData protocolData = ProtocolMessageUtil.parseData(messageExt.getBody());
-        if (protocolData == null) {
-            log.warn("实例控制消息协议解析失败，topic={}, msgId={}", messageExt.getTopic(), messageExt.getMsgId());
+        return ProtocolMessageUtil.parseData(messageExt.getBody());
+    }
+
+    /**
+     * 按业务异常分类输出统一日志。
+     *
+     * @param instanceId 实例 ID。
+     * @param messageExt RocketMQ 原始消息。
+     * @param protocolData 协议数据。
+     * @param exception 业务异常。
+     */
+    private void logByBusinessException(String instanceId,
+                                        MessageExt messageExt,
+                                        ProtocolData protocolData,
+                                        BusinessException exception) {
+        if (exception.getCategory() == BusinessException.Category.TDENGINE_WRITE) {
+            log.error("result=business_exception category={} instanceId={} topic={} messageType={} messageCode={} senderId={} simtime=-1 reason={}",
+                    exception.getCategory(),
+                    instanceId,
+                    messageExt.getTopic(),
+                    protocolData.getMessageType(),
+                    protocolData.getMessageCode(),
+                    protocolData.getSenderId(),
+                    exception.getMessage(),
+                    exception);
+            return;
         }
-        return protocolData;
+        log.warn("result=business_exception category={} instanceId={} topic={} messageType={} messageCode={} senderId={} simtime=-1 reason={}",
+                exception.getCategory(),
+                instanceId,
+                messageExt.getTopic(),
+                protocolData.getMessageType(),
+                protocolData.getMessageCode(),
+                protocolData.getSenderId(),
+                exception.getMessage());
     }
 }

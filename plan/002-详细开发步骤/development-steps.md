@@ -13,7 +13,7 @@
 | Phase 02 | TDengine 基础设施 | 建立 WebSocket 数据源、建表服务和写入服务 | Phase 00, Phase 01 | 已完成 | [phase-02.md](E:\project\5y\logger-server\plan\002-详细开发步骤\phases\phase-02.md) |
 | Phase 03 | RocketMQ 动态订阅 | 实现全局监听、实例级订阅管理与消息处理器 | Phase 00, Phase 01 | 已完成 | [phase-03.md](E:\project\5y\logger-server\plan\002-详细开发步骤\phases\phase-03.md) |
 | Phase 04 | 业务流程串联 | 打通创建、启动、暂停、继续、停止和态势入库主链路 | Phase 01, Phase 02, Phase 03 | 已完成 | [phase-04.md](E:\project\5y\logger-server\plan\002-详细开发步骤\phases\phase-04.md) |
-| Phase 05 | 测试、日志与交付收尾 | 完成 TDD 回补、异常处理、日志指标和交付校验 | Phase 00, Phase 01, Phase 02, Phase 03, Phase 04 | 未开始 | [phase-05.md](E:\project\5y\logger-server\plan\002-详细开发步骤\phases\phase-05.md) |
+| Phase 05 | 测试、日志与交付收尾 | 完成 TDD 回补、异常处理、日志指标和交付校验 | Phase 00, Phase 01, Phase 02, Phase 03, Phase 04 | 已完成 | [phase-05.md](E:\project\5y\logger-server\plan\002-详细开发步骤\phases\phase-05.md) |
 
 ## 3. 当前状态说明
 
@@ -22,7 +22,7 @@
 - Phase 02 已完成：`SituationRecordCommand`、`TdengineConstants`、`TdengineSchemaService`、`TdengineWriteService` 已落地，并通过 Maven 测试验证。
 - Phase 03 已完成：`RocketMqConsumerFactory`、`TopicSubscriptionManager`、`GlobalBroadcastListener`、`InstanceBroadcastMessageHandler`、`SituationMessageHandler` 已落地，订阅管理测试已补齐。
 - Phase 04 已完成：`TaskCreatePayload`、`SimulationLifecycleService`、`SimulationControlService`、`SituationRecordService` 已落地，创建/启动/暂停/继续/停止/态势入库主链路已串通，且服务层测试已补齐并通过 Java 8 下的 Maven 验证。
-- 当前可进入 Phase 05，继续补齐测试、日志、异常处理和交付收尾工作。
+- Phase 05 已完成：`LoggerMetrics`、`BusinessException`、`ProtocolParseException`、`ProtocolMessageUtilTest`、`SimulationFlowIntegrationTest` 已落地，协议解析、异常处理、结构化日志、基础指标与主流程集成测试已补齐，并已在 Java 8 环境下完成 Maven 测试验证。
 
 ## 4. 阶段依赖关系图
 
