@@ -7,6 +7,7 @@ import com.szzh.loggerserver.support.constant.TopicConstants;
 import com.szzh.loggerserver.support.metric.LoggerMetrics;
 import com.szzh.loggerserver.util.ProtocolData;
 import com.szzh.loggerserver.util.ProtocolMessageUtil;
+import org.apache.rocketmq.common.message.MessageExt;
 import org.apache.rocketmq.spring.annotation.ConsumeMode;
 import org.apache.rocketmq.spring.annotation.MessageModel;
 import org.apache.rocketmq.spring.annotation.RocketMQMessageListener;
@@ -19,6 +20,8 @@ import org.springframework.stereotype.Component;
 
 /**
  * 全局广播监听器。
+ * 注解监听模式下必须接收原始 {@link MessageExt}，否则 rocketmq-spring 会先把 body 转成字符串，
+ * 进而在回调时触发错误的类型转换，导致真实环境消费失败。
  */
 @Component
 @RocketMQMessageListener(
@@ -31,7 +34,7 @@ import org.springframework.stereotype.Component;
         name = "enable-global-listener",
         havingValue = "true",
         matchIfMissing = true)
-public class GlobalBroadcastListener implements RocketMQListener<byte[]> {
+public class GlobalBroadcastListener implements RocketMQListener<MessageExt> {
 
     private static final Logger log = LoggerFactory.getLogger(GlobalBroadcastListener.class);
 
@@ -78,17 +81,17 @@ public class GlobalBroadcastListener implements RocketMQListener<byte[]> {
     /**
      * 处理全局广播消息。
      *
-     * @param messageBody RocketMQ 消息体。
+     * @param messageExt RocketMQ 原始消息。
      */
     @Override
-    public void onMessage(byte[] messageBody) {
+    public void onMessage(MessageExt messageExt) {
         ProtocolData protocolData;
         try {
-            protocolData = ProtocolMessageUtil.parseData(messageBody);
+            protocolData = parse(messageExt);
         } catch (ProtocolParseException exception) {
             loggerMetrics.recordProtocolParseFailure();
             log.warn("result=protocol_parse_failed instanceId=- topic={} messageType=-1 messageCode=-1 senderId=-1 simtime=-1 reason={}",
-                    TopicConstants.GLOBAL_BROADCAST_TOPIC,
+                    messageExt == null ? TopicConstants.GLOBAL_BROADCAST_TOPIC : messageExt.getTopic(),
                     exception.getMessage());
             return;
         }
@@ -130,6 +133,19 @@ public class GlobalBroadcastListener implements RocketMQListener<byte[]> {
                     exception.getMessage(),
                     exception);
         }
+    }
+
+    /**
+     * 从原始 RocketMQ 消息中解析协议数据。
+     *
+     * @param messageExt RocketMQ 原始消息。
+     * @return 协议数据。
+     */
+    private ProtocolData parse(MessageExt messageExt) {
+        if (messageExt == null) {
+            throw new ProtocolParseException("RocketMQ 消息不能为空");
+        }
+        return ProtocolMessageUtil.parseData(messageExt.getBody());
     }
 
     /**

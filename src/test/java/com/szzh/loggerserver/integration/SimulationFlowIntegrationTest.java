@@ -120,7 +120,9 @@ class SimulationFlowIntegrationTest {
         LoggerMetrics metrics = new LoggerMetrics();
         GlobalBroadcastListener globalListener = new GlobalBroadcastListener(metrics);
 
-        globalListener.onMessage("broken-packet".getBytes(StandardCharsets.UTF_8));
+        globalListener.onMessage(buildMessageExt(
+                "broadcast-global",
+                "broken-packet".getBytes(StandardCharsets.UTF_8)));
 
         Assertions.assertEquals(1L, metrics.getProtocolParseFailureCount());
     }
@@ -129,30 +131,34 @@ class SimulationFlowIntegrationTest {
      * 构造创建消息。
      *
      * @param instanceId 实例 ID。
-     * @return 协议字节数组。
+     * @return RocketMQ 消息对象。
      */
-    private byte[] buildCreateMessage(String instanceId) {
+    private MessageExt buildCreateMessage(String instanceId) {
         String payload = "{\"instanceId\":\"" + instanceId + "\"}";
-        return ProtocolMessageUtil.buildData(
-                0,
-                (short) MessageConstants.GLOBAL_MESSAGE_TYPE,
-                MessageConstants.GLOBAL_CREATE_MESSAGE_CODE,
-                payload);
+        return buildMessageExt(
+                "broadcast-global",
+                ProtocolMessageUtil.buildData(
+                        0,
+                        (short) MessageConstants.GLOBAL_MESSAGE_TYPE,
+                        MessageConstants.GLOBAL_CREATE_MESSAGE_CODE,
+                        payload));
     }
 
     /**
      * 构造停止消息。
      *
      * @param instanceId 实例 ID。
-     * @return 协议字节数组。
+     * @return RocketMQ 消息对象。
      */
-    private byte[] buildStopMessage(String instanceId) {
+    private MessageExt buildStopMessage(String instanceId) {
         String payload = "{\"instanceId\":\"" + instanceId + "\"}";
-        return ProtocolMessageUtil.buildData(
-                0,
-                (short) MessageConstants.GLOBAL_MESSAGE_TYPE,
-                MessageConstants.GLOBAL_STOP_MESSAGE_CODE,
-                payload);
+        return buildMessageExt(
+                "broadcast-global",
+                ProtocolMessageUtil.buildData(
+                        0,
+                        (short) MessageConstants.GLOBAL_MESSAGE_TYPE,
+                        MessageConstants.GLOBAL_STOP_MESSAGE_CODE,
+                        payload));
     }
 
     /**
