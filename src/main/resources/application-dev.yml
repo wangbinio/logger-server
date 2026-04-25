@@ -7,6 +7,8 @@ logger-server:
     username: root
     password: taosdata
     driver-class-name: com.taosdata.jdbc.ws.WebSocketDriver
+    maximum-pool-size: 4
+    connection-timeout-ms: 30000
   rocketmq:
-    global-consumer-group: logger-global-consumer-local
-    instance-consumer-group-prefix: logger-instance-local
+    global-consumer-group: logger-global-consumer
+    instance-consumer-group-prefix: logger-instance

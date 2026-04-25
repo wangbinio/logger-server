@@ -22,33 +22,44 @@ public class InstanceBroadcastMessageHandler {
 
     private static final Logger log = LoggerFactory.getLogger(InstanceBroadcastMessageHandler.class);
 
+    private final MessageConstants messageConstants;
+
     private SimulationControlCommandPort simulationControlCommandPort;
 
     private LoggerMetrics loggerMetrics = new LoggerMetrics();
 
     /**
      * 创建实例级控制消息处理器。
+     *
+     * @param messageConstants 消息常量配置。
      */
-    public InstanceBroadcastMessageHandler() {
+    @Autowired
+    public InstanceBroadcastMessageHandler(MessageConstants messageConstants) {
+        this(messageConstants, null, null);
     }
 
     /**
      * 创建实例级控制消息处理器。
      *
+     * @param messageConstants 消息常量配置。
      * @param simulationControlCommandPort 控制命令委派端口。
      */
-    public InstanceBroadcastMessageHandler(SimulationControlCommandPort simulationControlCommandPort) {
-        this.simulationControlCommandPort = simulationControlCommandPort;
+    public InstanceBroadcastMessageHandler(MessageConstants messageConstants,
+                                           SimulationControlCommandPort simulationControlCommandPort) {
+        this(messageConstants, simulationControlCommandPort, null);
     }
 
     /**
      * 创建实例级控制消息处理器。
      *
+     * @param messageConstants 消息常量配置。
      * @param simulationControlCommandPort 控制命令委派端口。
      * @param loggerMetrics 指标封装。
      */
-    public InstanceBroadcastMessageHandler(SimulationControlCommandPort simulationControlCommandPort,
+    public InstanceBroadcastMessageHandler(MessageConstants messageConstants,
+                                           SimulationControlCommandPort simulationControlCommandPort,
                                            LoggerMetrics loggerMetrics) {
+        this.messageConstants = Objects.requireNonNull(messageConstants, "messageConstants 不能为空");
         this.simulationControlCommandPort = simulationControlCommandPort;
         this.loggerMetrics = loggerMetrics == null ? new LoggerMetrics() : loggerMetrics;
     }
@@ -91,7 +102,7 @@ public class InstanceBroadcastMessageHandler {
                     exception.getMessage());
             return;
         }
-        if (!MessageConstants.isInstanceControlMessage(protocolData.getMessageType())) {
+        if (!messageConstants.isInstanceControlMessage(protocolData.getMessageType())) {
             return;
         }
         if (simulationControlCommandPort == null) {
@@ -104,25 +115,25 @@ public class InstanceBroadcastMessageHandler {
             return;
         }
         try {
-            switch (protocolData.getMessageCode()) {
-                case MessageConstants.INSTANCE_START_MESSAGE_CODE:
-                    simulationControlCommandPort.handleStart(instanceId, protocolData);
-                    return;
-                case MessageConstants.INSTANCE_PAUSE_MESSAGE_CODE:
-                    simulationControlCommandPort.handlePause(instanceId, protocolData);
-                    return;
-                case MessageConstants.INSTANCE_RESUME_MESSAGE_CODE:
-                    simulationControlCommandPort.handleResume(instanceId, protocolData);
-                    return;
-                default:
-                    loggerMetrics.recordStateViolation();
-                    log.debug("result=ignored_unknown_message instanceId={} topic={} messageType={} messageCode={} senderId={} simtime=-1",
-                            instanceId,
-                            messageExt.getTopic(),
-                            protocolData.getMessageType(),
-                            protocolData.getMessageCode(),
-                            protocolData.getSenderId());
+            if (protocolData.getMessageCode() == messageConstants.getInstanceStartMessageCode()) {
+                simulationControlCommandPort.handleStart(instanceId, protocolData);
+                return;
             }
+            if (protocolData.getMessageCode() == messageConstants.getInstancePauseMessageCode()) {
+                simulationControlCommandPort.handlePause(instanceId, protocolData);
+                return;
+            }
+            if (protocolData.getMessageCode() == messageConstants.getInstanceResumeMessageCode()) {
+                simulationControlCommandPort.handleResume(instanceId, protocolData);
+                return;
+            }
+            loggerMetrics.recordStateViolation();
+            log.debug("result=ignored_unknown_message instanceId={} topic={} messageType={} messageCode={} senderId={} simtime=-1",
+                    instanceId,
+                    messageExt.getTopic(),
+                    protocolData.getMessageType(),
+                    protocolData.getMessageCode(),
+                    protocolData.getSenderId());
         } catch (BusinessException exception) {
             logByBusinessException(instanceId, messageExt, protocolData, exception);
         } catch (RuntimeException exception) {

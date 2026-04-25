@@ -1,25 +1,89 @@
 package com.szzh.loggerserver.support.constant;
 
+import com.szzh.loggerserver.config.LoggerServerProperties;
+import lombok.Getter;
+import org.springframework.stereotype.Component;
+
+import java.util.Objects;
+
 /**
- * 协议消息常量定义。
+ * 协议消息配置快照。
  */
-public final class MessageConstants {
+@Getter
+@Component
+public class MessageConstants {
 
-    public static final int GLOBAL_MESSAGE_TYPE = 0;
+    /**
+     * -- GETTER --
+     *  获取全局生命周期消息类型。
+     *
+     * @return 全局生命周期消息类型。
+     */
+    private final int globalMessageType;
 
-    public static final int GLOBAL_CREATE_MESSAGE_CODE = 0;
+    /**
+     * -- GETTER --
+     *  获取全局创建消息码。
+     *
+     * @return 全局创建消息码。
+     */
+    private final int globalCreateMessageCode;
 
-    public static final int GLOBAL_STOP_MESSAGE_CODE = 1;
+    /**
+     * -- GETTER --
+     *  获取全局停止消息码。
+     *
+     * @return 全局停止消息码。
+     */
+    private final int globalStopMessageCode;
 
-    public static final int INSTANCE_CONTROL_MESSAGE_TYPE = 1100;
+    /**
+     * -- GETTER --
+     *  获取实例控制消息类型。
+     *
+     * @return 实例控制消息类型。
+     */
+    private final int instanceControlMessageType;
 
-    public static final int INSTANCE_START_MESSAGE_CODE = 1;
+    /**
+     * -- GETTER --
+     *  获取实例启动消息码。
+     *
+     * @return 实例启动消息码。
+     */
+    private final int instanceStartMessageCode;
 
-    public static final int INSTANCE_PAUSE_MESSAGE_CODE = 5;
+    /**
+     * -- GETTER --
+     *  获取实例暂停消息码。
+     *
+     * @return 实例暂停消息码。
+     */
+    private final int instancePauseMessageCode;
 
-    public static final int INSTANCE_RESUME_MESSAGE_CODE = 6;
+    /**
+     * -- GETTER --
+     *  获取实例继续消息码。
+     *
+     * @return 实例继续消息码。
+     */
+    private final int instanceResumeMessageCode;
 
-    private MessageConstants() {
+    /**
+     * 根据项目配置创建消息常量快照。
+     *
+     * @param properties 项目配置。
+     */
+    public MessageConstants(LoggerServerProperties properties) {
+        Objects.requireNonNull(properties, "properties 不能为空");
+        LoggerServerProperties.Messages messages = properties.getProtocol().getMessages();
+        this.globalMessageType = messages.getGlobal().getMessageType();
+        this.globalCreateMessageCode = messages.getGlobal().getCreateMessageCode();
+        this.globalStopMessageCode = messages.getGlobal().getStopMessageCode();
+        this.instanceControlMessageType = messages.getInstance().getMessageType();
+        this.instanceStartMessageCode = messages.getInstance().getStartMessageCode();
+        this.instancePauseMessageCode = messages.getInstance().getPauseMessageCode();
+        this.instanceResumeMessageCode = messages.getInstance().getResumeMessageCode();
     }
 
     /**
@@ -28,8 +92,8 @@ public final class MessageConstants {
      * @param messageType 消息类型。
      * @return 是否为全局消息。
      */
-    public static boolean isGlobalLifecycleMessage(int messageType) {
-        return messageType == GLOBAL_MESSAGE_TYPE;
+    public boolean isGlobalLifecycleMessage(int messageType) {
+        return messageType == globalMessageType;
     }
 
     /**
@@ -38,7 +102,7 @@ public final class MessageConstants {
      * @param messageType 消息类型。
      * @return 是否为实例控制消息。
      */
-    public static boolean isInstanceControlMessage(int messageType) {
-        return messageType == INSTANCE_CONTROL_MESSAGE_TYPE;
+    public boolean isInstanceControlMessage(int messageType) {
+        return messageType == instanceControlMessageType;
     }
 }

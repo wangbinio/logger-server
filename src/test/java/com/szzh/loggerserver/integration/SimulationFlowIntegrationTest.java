@@ -1,5 +1,6 @@
 package com.szzh.loggerserver.integration;
 
+import com.szzh.loggerserver.config.LoggerServerProperties;
 import com.szzh.loggerserver.domain.clock.SimulationClock;
 import com.szzh.loggerserver.domain.session.SimulationSession;
 import com.szzh.loggerserver.domain.session.SimulationSessionManager;
@@ -32,6 +33,8 @@ import java.util.concurrent.atomic.AtomicLong;
  */
 class SimulationFlowIntegrationTest {
 
+    private final MessageConstants messageConstants = new MessageConstants(new LoggerServerProperties());
+
     /**
      * 验证创建、启动、态势写入、暂停、继续、停止链路能够完整走通并更新指标。
      */
@@ -47,9 +50,10 @@ class SimulationFlowIntegrationTest {
                 new SimulationLifecycleService(sessionManager, schemaService, subscriptionManager, metrics);
         SimulationControlService controlService = new SimulationControlService(sessionManager, metrics);
         SituationRecordService recordService = new SituationRecordService(sessionManager, writeService, metrics);
-        GlobalBroadcastListener globalListener = new GlobalBroadcastListener();
+        GlobalBroadcastListener globalListener = new GlobalBroadcastListener(messageConstants);
         globalListener.setSimulationLifecycleCommandPort(lifecycleService);
-        InstanceBroadcastMessageHandler controlHandler = new InstanceBroadcastMessageHandler(controlService, metrics);
+        InstanceBroadcastMessageHandler controlHandler =
+                new InstanceBroadcastMessageHandler(messageConstants, controlService, metrics);
         SituationMessageHandler situationHandler = new SituationMessageHandler(recordService, metrics);
 
         globalListener.onMessage(buildCreateMessage("instance-001"));
@@ -63,8 +67,8 @@ class SimulationFlowIntegrationTest {
         controlHandler.handle("instance-001", buildMessageExt(
                 "instance-control",
                 ProtocolMessageUtil.buildData(11,
-                        (short) MessageConstants.INSTANCE_CONTROL_MESSAGE_TYPE,
-                        MessageConstants.INSTANCE_START_MESSAGE_CODE,
+                        (short) messageConstants.getInstanceControlMessageType(),
+                        messageConstants.getInstanceStartMessageCode(),
                         new byte[0])));
         Assertions.assertEquals(SimulationSessionState.RUNNING, createdSession.getState());
 
@@ -84,8 +88,8 @@ class SimulationFlowIntegrationTest {
         controlHandler.handle("instance-001", buildMessageExt(
                 "instance-control",
                 ProtocolMessageUtil.buildData(11,
-                        (short) MessageConstants.INSTANCE_CONTROL_MESSAGE_TYPE,
-                        MessageConstants.INSTANCE_PAUSE_MESSAGE_CODE,
+                        (short) messageConstants.getInstanceControlMessageType(),
+                        messageConstants.getInstancePauseMessageCode(),
                         new byte[0])));
         Assertions.assertEquals(SimulationSessionState.PAUSED, createdSession.getState());
 
@@ -99,8 +103,8 @@ class SimulationFlowIntegrationTest {
         controlHandler.handle("instance-001", buildMessageExt(
                 "instance-control",
                 ProtocolMessageUtil.buildData(11,
-                        (short) MessageConstants.INSTANCE_CONTROL_MESSAGE_TYPE,
-                        MessageConstants.INSTANCE_RESUME_MESSAGE_CODE,
+                        (short) messageConstants.getInstanceControlMessageType(),
+                        messageConstants.getInstanceResumeMessageCode(),
                         new byte[0])));
         Assertions.assertEquals(SimulationSessionState.RUNNING, createdSession.getState());
 
@@ -118,7 +122,7 @@ class SimulationFlowIntegrationTest {
     @Test
     void shouldRecordProtocolFailureWithoutBreakingConsumer() {
         LoggerMetrics metrics = new LoggerMetrics();
-        GlobalBroadcastListener globalListener = new GlobalBroadcastListener(metrics);
+        GlobalBroadcastListener globalListener = new GlobalBroadcastListener(messageConstants, metrics);
 
         globalListener.onMessage(buildMessageExt(
                 "broadcast-global",
@@ -139,8 +143,8 @@ class SimulationFlowIntegrationTest {
                 "broadcast-global",
                 ProtocolMessageUtil.buildData(
                         0,
-                        (short) MessageConstants.GLOBAL_MESSAGE_TYPE,
-                        MessageConstants.GLOBAL_CREATE_MESSAGE_CODE,
+                        (short) messageConstants.getGlobalMessageType(),
+                        messageConstants.getGlobalCreateMessageCode(),
                         payload));
     }
 
@@ -156,8 +160,8 @@ class SimulationFlowIntegrationTest {
                 "broadcast-global",
                 ProtocolMessageUtil.buildData(
                         0,
-                        (short) MessageConstants.GLOBAL_MESSAGE_TYPE,
-                        MessageConstants.GLOBAL_STOP_MESSAGE_CODE,
+                        (short) messageConstants.getGlobalMessageType(),
+                        messageConstants.getGlobalStopMessageCode(),
                         payload));
     }
 

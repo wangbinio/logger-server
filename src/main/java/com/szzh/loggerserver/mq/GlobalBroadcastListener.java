@@ -18,6 +18,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
+import java.util.Objects;
+
 /**
  * 全局广播监听器。
  * 注解监听模式下必须接收原始 {@link MessageExt}，否则 rocketmq-spring 会先把 body 转成字符串，
@@ -38,6 +40,8 @@ public class GlobalBroadcastListener implements RocketMQListener<MessageExt> {
 
     private static final Logger log = LoggerFactory.getLogger(GlobalBroadcastListener.class);
 
+    private final MessageConstants messageConstants;
+
     private SimulationLifecycleCommandPort simulationLifecycleCommandPort;
 
     private LoggerMetrics loggerMetrics = new LoggerMetrics();
@@ -45,16 +49,21 @@ public class GlobalBroadcastListener implements RocketMQListener<MessageExt> {
     /**
      * 创建全局广播监听器。
      *
+     * @param messageConstants 消息常量配置。
      */
-    public GlobalBroadcastListener() {
+    @Autowired
+    public GlobalBroadcastListener(MessageConstants messageConstants) {
+        this(messageConstants, null);
     }
 
     /**
      * 创建全局广播监听器。
      *
+     * @param messageConstants 消息常量配置。
      * @param loggerMetrics 指标封装。
      */
-    public GlobalBroadcastListener(LoggerMetrics loggerMetrics) {
+    public GlobalBroadcastListener(MessageConstants messageConstants, LoggerMetrics loggerMetrics) {
+        this.messageConstants = Objects.requireNonNull(messageConstants, "messageConstants 不能为空");
         this.loggerMetrics = loggerMetrics == null ? new LoggerMetrics() : loggerMetrics;
     }
 
@@ -95,7 +104,7 @@ public class GlobalBroadcastListener implements RocketMQListener<MessageExt> {
                     exception.getMessage());
             return;
         }
-        if (!MessageConstants.isGlobalLifecycleMessage(protocolData.getMessageType())) {
+        if (!messageConstants.isGlobalLifecycleMessage(protocolData.getMessageType())) {
             return;
         }
         if (simulationLifecycleCommandPort == null) {
@@ -107,21 +116,20 @@ public class GlobalBroadcastListener implements RocketMQListener<MessageExt> {
             return;
         }
         try {
-            switch (protocolData.getMessageCode()) {
-                case MessageConstants.GLOBAL_CREATE_MESSAGE_CODE:
-                    simulationLifecycleCommandPort.handleCreate(protocolData);
-                    return;
-                case MessageConstants.GLOBAL_STOP_MESSAGE_CODE:
-                    simulationLifecycleCommandPort.handleStop(protocolData);
-                    return;
-                default:
-                    loggerMetrics.recordStateViolation();
-                    log.debug("result=ignored_unknown_message instanceId=- topic={} messageType={} messageCode={} senderId={} simtime=-1",
-                            TopicConstants.GLOBAL_BROADCAST_TOPIC,
-                            protocolData.getMessageType(),
-                            protocolData.getMessageCode(),
-                            protocolData.getSenderId());
+            if (protocolData.getMessageCode() == messageConstants.getGlobalCreateMessageCode()) {
+                simulationLifecycleCommandPort.handleCreate(protocolData);
+                return;
             }
+            if (protocolData.getMessageCode() == messageConstants.getGlobalStopMessageCode()) {
+                simulationLifecycleCommandPort.handleStop(protocolData);
+                return;
+            }
+            loggerMetrics.recordStateViolation();
+            log.debug("result=ignored_unknown_message instanceId=- topic={} messageType={} messageCode={} senderId={} simtime=-1",
+                    TopicConstants.GLOBAL_BROADCAST_TOPIC,
+                    protocolData.getMessageType(),
+                    protocolData.getMessageCode(),
+                    protocolData.getSenderId());
         } catch (BusinessException exception) {
             logByBusinessException("-", TopicConstants.GLOBAL_BROADCAST_TOPIC, protocolData, exception);
         } catch (RuntimeException exception) {

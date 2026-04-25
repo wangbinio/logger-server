@@ -83,6 +83,9 @@ class RealEnvironmentFullFlowTest {
     @Autowired
     private LoggerServerProperties loggerServerProperties;
 
+    @Autowired
+    private MessageConstants messageConstants;
+
     /**
      * 验证真实环境下可完成创建、启动、暂停、继续、停止以及 TDengine 落库校验。
      *
@@ -115,7 +118,7 @@ class RealEnvironmentFullFlowTest {
                 }
             });
 
-            sendInstanceControl(producer, instanceId, MessageConstants.INSTANCE_START_MESSAGE_CODE);
+            sendInstanceControl(producer, instanceId, messageConstants.getInstanceStartMessageCode());
             waitUntil("会话进入 RUNNING 状态", 30, new BooleanSupplier() {
                 /**
                  * 判断条件是否成立。
@@ -133,7 +136,7 @@ class RealEnvironmentFullFlowTest {
             long nextTickMillis = System.currentTimeMillis();
             for (int second = 0; second < TEST_DURATION_SECONDS; second++) {
                 if (second == PAUSE_AT_SECOND) {
-                    sendInstanceControl(producer, instanceId, MessageConstants.INSTANCE_PAUSE_MESSAGE_CODE);
+                    sendInstanceControl(producer, instanceId, messageConstants.getInstancePauseMessageCode());
                     waitUntil("会话进入 PAUSED 状态", 30, new BooleanSupplier() {
                         /**
                          * 判断条件是否成立。
@@ -149,7 +152,7 @@ class RealEnvironmentFullFlowTest {
                     });
                 }
                 if (second == RESUME_AT_SECOND) {
-                    sendInstanceControl(producer, instanceId, MessageConstants.INSTANCE_RESUME_MESSAGE_CODE);
+                    sendInstanceControl(producer, instanceId, messageConstants.getInstanceResumeMessageCode());
                     waitUntil("会话恢复 RUNNING 状态", 30, new BooleanSupplier() {
                         /**
                          * 判断条件是否成立。
@@ -261,7 +264,7 @@ class RealEnvironmentFullFlowTest {
      * @throws MQClientException RocketMQ 异常。
      */
     private DefaultMQPushConsumer createGlobalConsumer() throws MQClientException {
-        final GlobalBroadcastListener listener = new GlobalBroadcastListener();
+        final GlobalBroadcastListener listener = new GlobalBroadcastListener(messageConstants);
         listener.setSimulationLifecycleCommandPort(simulationLifecycleCommandPort);
 
         DefaultMQPushConsumer consumer = new DefaultMQPushConsumer(
@@ -356,8 +359,8 @@ class RealEnvironmentFullFlowTest {
                 TopicConstants.GLOBAL_BROADCAST_TOPIC,
                 ProtocolMessageUtil.buildData(
                         0,
-                        (short) MessageConstants.GLOBAL_MESSAGE_TYPE,
-                        MessageConstants.GLOBAL_CREATE_MESSAGE_CODE,
+                        (short) messageConstants.getGlobalMessageType(),
+                        messageConstants.getGlobalCreateMessageCode(),
                         buildInstancePayload(instanceId))));
     }
 
@@ -373,8 +376,8 @@ class RealEnvironmentFullFlowTest {
                 TopicConstants.GLOBAL_BROADCAST_TOPIC,
                 ProtocolMessageUtil.buildData(
                         0,
-                        (short) MessageConstants.GLOBAL_MESSAGE_TYPE,
-                        MessageConstants.GLOBAL_STOP_MESSAGE_CODE,
+                        (short) messageConstants.getGlobalMessageType(),
+                        messageConstants.getGlobalStopMessageCode(),
                         buildInstancePayload(instanceId))));
     }
 
@@ -393,7 +396,7 @@ class RealEnvironmentFullFlowTest {
                 TopicConstants.buildInstanceBroadcastTopic(instanceId),
                 ProtocolMessageUtil.buildData(
                         0,
-                        (short) MessageConstants.INSTANCE_CONTROL_MESSAGE_TYPE,
+                        (short) messageConstants.getInstanceControlMessageType(),
                         messageCode,
                         new byte[0])));
     }

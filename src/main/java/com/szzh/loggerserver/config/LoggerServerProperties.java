@@ -46,6 +46,47 @@ public class LoggerServerProperties {
     public static class Protocol {
 
         private int maxPayloadSize = 102400;
+
+        private final Messages messages = new Messages();
+    }
+
+    /**
+     * 协议消息分类配置。
+     */
+    @Data
+    public static class Messages {
+
+        private final Global global = new Global();
+
+        private final Instance instance = new Instance();
+    }
+
+    /**
+     * 全局生命周期消息配置。
+     */
+    @Data
+    public static class Global {
+
+        private int messageType = 0;
+
+        private int createMessageCode = 0;
+
+        private int stopMessageCode = 1;
+    }
+
+    /**
+     * 实例控制消息配置。
+     */
+    @Data
+    public static class Instance {
+
+        private int messageType = 1100;
+
+        private int startMessageCode = 1;
+
+        private int pauseMessageCode = 5;
+
+        private int resumeMessageCode = 6;
     }
 
     /**

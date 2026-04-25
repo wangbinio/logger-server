@@ -2,7 +2,7 @@ spring:
   application:
     name: logger-server
   profiles:
-    active: local
+    active: dev
 
 logging:
   level:
@@ -10,16 +10,30 @@ logging:
     com.szzh.loggerserver: INFO
 
 logger-server:
-  tdengine:
-    maximum-pool-size: 4
-    connection-timeout-ms: 30000
   protocol:
     max-payload-size: 102400
+    messages:
+      # broadcast-global 仿真任务管理消息
+      global:
+        # 类型编号
+        message-type: 0
+        # 任务创建
+        create-message-code: 0
+        # 任务停止
+        stop-message-code: 1
+
+      # broadcast-{ScenarioInstanceID} 仿真控制指令
+      instance:
+        # 类型编号
+        message-type: 1100
+        # 仿真启动控制指令
+        start-message-code: 1
+        # 仿真暂停控制指令
+        pause-message-code: 5
+        # 继续仿真控制指令
+        resume-message-code: 6
   session:
     cleanup-delay-seconds: 30
   write:
     retry-times: 3
     batch-size: 500
-  rocketmq:
-    global-consumer-group: logger-global-consumer
-    instance-consumer-group-prefix: logger-instance

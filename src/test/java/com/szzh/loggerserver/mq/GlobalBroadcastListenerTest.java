@@ -1,5 +1,6 @@
 package com.szzh.loggerserver.mq;
 
+import com.szzh.loggerserver.config.LoggerServerProperties;
 import com.szzh.loggerserver.support.constant.MessageConstants;
 import com.szzh.loggerserver.support.constant.TopicConstants;
 import com.szzh.loggerserver.util.ProtocolData;
@@ -20,6 +21,8 @@ import java.util.Arrays;
  * 全局广播监听器测试。
  */
 class GlobalBroadcastListenerTest {
+
+    private final MessageConstants defaultMessageConstants = new MessageConstants(new LoggerServerProperties());
 
     /**
      * 验证监听器显式声明为接收原始 MessageExt，避免注解容器错误地先转成 String。
@@ -48,7 +51,7 @@ class GlobalBroadcastListenerTest {
     @Test
     void shouldHandleCreateMessageFromRawMessageExt() {
         SimulationLifecycleCommandPort commandPort = Mockito.mock(SimulationLifecycleCommandPort.class);
-        GlobalBroadcastListener listener = new GlobalBroadcastListener();
+        GlobalBroadcastListener listener = new GlobalBroadcastListener(defaultMessageConstants);
         listener.setSimulationLifecycleCommandPort(commandPort);
 
         byte[] payload = "{\"instanceId\":\"instance-001\"}".getBytes(StandardCharsets.UTF_8);
@@ -56,8 +59,8 @@ class GlobalBroadcastListenerTest {
         messageExt.setTopic(TopicConstants.GLOBAL_BROADCAST_TOPIC);
         messageExt.setBody(ProtocolMessageUtil.buildData(
                 0,
-                (short) MessageConstants.GLOBAL_MESSAGE_TYPE,
-                MessageConstants.GLOBAL_CREATE_MESSAGE_CODE,
+                (short) defaultMessageConstants.getGlobalMessageType(),
+                defaultMessageConstants.getGlobalCreateMessageCode(),
                 payload));
 
         listener.onMessage(messageExt);
@@ -65,8 +68,37 @@ class GlobalBroadcastListenerTest {
         ArgumentCaptor<ProtocolData> protocolDataCaptor = ArgumentCaptor.forClass(ProtocolData.class);
         Mockito.verify(commandPort).handleCreate(protocolDataCaptor.capture());
         ProtocolData protocolData = protocolDataCaptor.getValue();
-        Assertions.assertEquals(MessageConstants.GLOBAL_MESSAGE_TYPE, protocolData.getMessageType());
-        Assertions.assertEquals(MessageConstants.GLOBAL_CREATE_MESSAGE_CODE, protocolData.getMessageCode());
+        Assertions.assertEquals(defaultMessageConstants.getGlobalMessageType(), protocolData.getMessageType());
+        Assertions.assertEquals(defaultMessageConstants.getGlobalCreateMessageCode(), protocolData.getMessageCode());
         Assertions.assertTrue(Arrays.equals(payload, protocolData.getRawData()), "原始载荷应保持不变");
+    }
+
+    /**
+     * 验证监听器会使用配置化的全局消息类型与消息码进行委派。
+     */
+    @Test
+    void shouldHandleConfiguredGlobalCreateMessage() {
+        LoggerServerProperties properties = new LoggerServerProperties();
+        properties.getProtocol().getMessages().getGlobal().setMessageType(12);
+        properties.getProtocol().getMessages().getGlobal().setCreateMessageCode(34);
+        SimulationLifecycleCommandPort commandPort = Mockito.mock(SimulationLifecycleCommandPort.class);
+        GlobalBroadcastListener listener = new GlobalBroadcastListener(new MessageConstants(properties));
+        listener.setSimulationLifecycleCommandPort(commandPort);
+
+        byte[] payload = "{\"instanceId\":\"instance-002\"}".getBytes(StandardCharsets.UTF_8);
+        MessageExt messageExt = new MessageExt();
+        messageExt.setTopic(TopicConstants.GLOBAL_BROADCAST_TOPIC);
+        messageExt.setBody(ProtocolMessageUtil.buildData(
+                0,
+                (short) 12,
+                34,
+                payload));
+
+        listener.onMessage(messageExt);
+
+        ArgumentCaptor<ProtocolData> protocolDataCaptor = ArgumentCaptor.forClass(ProtocolData.class);
+        Mockito.verify(commandPort).handleCreate(protocolDataCaptor.capture());
+        Assertions.assertEquals(12, protocolDataCaptor.getValue().getMessageType());
+        Assertions.assertEquals(34, protocolDataCaptor.getValue().getMessageCode());
     }
 }

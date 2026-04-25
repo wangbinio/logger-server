@@ -3,6 +3,7 @@ package com.szzh.loggerserver.mq;
 import com.szzh.loggerserver.config.RocketMqConsumerFactory;
 import com.szzh.loggerserver.config.LoggerServerProperties;
 import com.szzh.loggerserver.domain.session.SimulationSessionManager;
+import com.szzh.loggerserver.support.constant.MessageConstants;
 import com.szzh.loggerserver.support.constant.TopicConstants;
 import com.szzh.loggerserver.util.ProtocolData;
 import com.szzh.loggerserver.util.ProtocolMessageUtil;
@@ -35,6 +36,8 @@ import java.util.concurrent.atomic.AtomicReference;
  */
 class TopicSubscriptionManagerTest {
 
+    private final MessageConstants defaultMessageConstants = new MessageConstants(new LoggerServerProperties());
+
     /**
      * 验证重复订阅同一实例时只会真正创建一组消费者。
      */
@@ -46,7 +49,7 @@ class TopicSubscriptionManagerTest {
         DefaultMQPushConsumer broadcastConsumer = Mockito.mock(DefaultMQPushConsumer.class);
         DefaultMQPushConsumer situationConsumer = Mockito.mock(DefaultMQPushConsumer.class);
         InstanceBroadcastMessageHandler instanceHandler =
-                new InstanceBroadcastMessageHandler(new NoopSimulationControlCommandPort());
+                new InstanceBroadcastMessageHandler(defaultMessageConstants, new NoopSimulationControlCommandPort());
         SituationMessageHandler situationHandler =
                 new SituationMessageHandler(new NoopSituationRecordIngressPort());
         TopicSubscriptionManager subscriptionManager = new TopicSubscriptionManager(
@@ -89,7 +92,7 @@ class TopicSubscriptionManagerTest {
         TopicSubscriptionManager subscriptionManager = new TopicSubscriptionManager(
                 sessionManager,
                 consumerFactory,
-                new InstanceBroadcastMessageHandler(new NoopSimulationControlCommandPort()),
+                new InstanceBroadcastMessageHandler(defaultMessageConstants, new NoopSimulationControlCommandPort()),
                 new SituationMessageHandler(new NoopSituationRecordIngressPort()));
 
         Mockito.when(consumerFactory.createInstanceBroadcastConsumer(Mockito.eq("instance-001"), Mockito.any()))
@@ -117,7 +120,7 @@ class TopicSubscriptionManagerTest {
         TopicSubscriptionManager subscriptionManager = new TopicSubscriptionManager(
                 new SimulationSessionManager(),
                 Mockito.mock(RocketMqConsumerFactory.class),
-                new InstanceBroadcastMessageHandler(new NoopSimulationControlCommandPort()),
+                new InstanceBroadcastMessageHandler(defaultMessageConstants, new NoopSimulationControlCommandPort()),
                 new SituationMessageHandler(new NoopSituationRecordIngressPort()));
 
         Assertions.assertThrows(IllegalArgumentException.class,
@@ -137,7 +140,7 @@ class TopicSubscriptionManagerTest {
         TopicSubscriptionManager subscriptionManager = new TopicSubscriptionManager(
                 sessionManager,
                 consumerFactory,
-                new InstanceBroadcastMessageHandler(new NoopSimulationControlCommandPort()),
+                new InstanceBroadcastMessageHandler(defaultMessageConstants, new NoopSimulationControlCommandPort()),
                 new SituationMessageHandler(new NoopSituationRecordIngressPort()));
 
         Mockito.when(consumerFactory.createInstanceBroadcastConsumer(Mockito.eq("instance-001"), Mockito.any()))
@@ -164,6 +167,7 @@ class TopicSubscriptionManagerTest {
         Properties properties = loadApplicationProperties();
         RocketMQProperties rocketMQProperties = buildRocketMqProperties(properties);
         LoggerServerProperties loggerServerProperties = buildLoggerServerProperties(properties);
+        MessageConstants messageConstants = new MessageConstants(loggerServerProperties);
         RocketMqConsumerFactory consumerFactory =
                 new RocketMqConsumerFactory(rocketMQProperties, loggerServerProperties);
         SimulationSessionManager sessionManager = new SimulationSessionManager();
@@ -175,7 +179,7 @@ class TopicSubscriptionManagerTest {
         TopicSubscriptionManager subscriptionManager = new TopicSubscriptionManager(
                 sessionManager,
                 consumerFactory,
-                new InstanceBroadcastMessageHandler(new RecordingSimulationControlCommandPort(
+                new InstanceBroadcastMessageHandler(messageConstants, new RecordingSimulationControlCommandPort(
                         controlLatch,
                         controlDataRef)),
                 new SituationMessageHandler(new RecordingSituationRecordIngressPort(
@@ -200,8 +204,8 @@ class TopicSubscriptionManagerTest {
                     TopicConstants.buildInstanceBroadcastTopic(instanceId),
                     ProtocolMessageUtil.buildData(
                             101,
-                            (short) 1100,
-                            1,
+                            (short) messageConstants.getInstanceControlMessageType(),
+                            messageConstants.getInstanceStartMessageCode(),
                             "start".getBytes(StandardCharsets.UTF_8))));
             producer.send(new Message(
                     TopicConstants.buildInstanceSituationTopic(instanceId),
@@ -213,8 +217,9 @@ class TopicSubscriptionManagerTest {
 
             Assertions.assertTrue(controlLatch.await(15, TimeUnit.SECONDS), "实例控制消息未在预期时间内消费");
             Assertions.assertTrue(situationLatch.await(15, TimeUnit.SECONDS), "态势消息未在预期时间内消费");
-            Assertions.assertEquals(1100, Objects.requireNonNull(controlDataRef.get()).getMessageType());
-            Assertions.assertEquals(1, controlDataRef.get().getMessageCode());
+            Assertions.assertEquals(messageConstants.getInstanceControlMessageType(),
+                    Objects.requireNonNull(controlDataRef.get()).getMessageType());
+            Assertions.assertEquals(messageConstants.getInstanceStartMessageCode(), controlDataRef.get().getMessageCode());
             Assertions.assertEquals(2100, Objects.requireNonNull(situationDataRef.get()).getMessageType());
             Assertions.assertEquals(7, situationDataRef.get().getMessageCode());
         } finally {
@@ -232,7 +237,7 @@ class TopicSubscriptionManagerTest {
         YamlPropertiesFactoryBean yamlPropertiesFactoryBean = new YamlPropertiesFactoryBean();
         yamlPropertiesFactoryBean.setResources(
                 new ClassPathResource("application.yml"),
-                new ClassPathResource("application-local.yml"));
+                new ClassPathResource("application-dev.yml"));
         Properties properties = yamlPropertiesFactoryBean.getObject();
         Assertions.assertNotNull(properties, "未能加载 application 配置");
         return properties;

@@ -75,6 +75,28 @@
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
             </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-antrun-plugin</artifactId>
+                <version>3.1.0</version>
+                <executions>
+                    <execution>
+                        <id>copy-dev-config-as-local-for-tests</id>
+                        <phase>process-test-resources</phase>
+                        <configuration>
+                            <target>
+                                <mkdir dir="${project.build.testOutputDirectory}"/>
+                                <copy file="${project.basedir}/src/main/resources/application-dev.yml"
+                                      tofile="${project.build.testOutputDirectory}/application-local.yml"
+                                      overwrite="true"/>
+                            </target>
+                        </configuration>
+                        <goals>
+                            <goal>run</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
         </plugins>
     </build>
 
