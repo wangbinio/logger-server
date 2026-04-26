@@ -1,5 +1,7 @@
 package com.szzh.replayserver.integration;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.szzh.common.json.JsonUtil;
 import com.szzh.common.protocol.ProtocolData;
 import com.szzh.common.protocol.ProtocolMessageUtil;
 import com.szzh.common.tdengine.TdengineNaming;
@@ -9,7 +11,8 @@ import com.szzh.replayserver.config.ReplayServerProperties;
 import com.szzh.replayserver.domain.session.ReplaySession;
 import com.szzh.replayserver.domain.session.ReplaySessionManager;
 import com.szzh.replayserver.domain.session.ReplaySessionState;
-import com.szzh.replayserver.service.ReplayLifecycleService;
+import com.szzh.replayserver.mq.ReplayGlobalBroadcastListener;
+import com.szzh.replayserver.mq.ReplayTopicSubscriptionManager;
 import com.szzh.replayserver.support.constant.ReplayMessageConstants;
 import com.szzh.replayserver.support.metric.ReplayMetrics;
 import org.apache.rocketmq.client.AccessChannel;
@@ -26,6 +29,7 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
@@ -36,20 +40,21 @@ import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.Statement;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BooleanSupplier;
 
 /**
  * 回放真实环境集成测试。
  */
-@SpringBootTest(
-        classes = ReplayServerApplication.class,
-        properties = "replay-server.rocketmq.enable-global-listener=false")
-@ActiveProfiles("dev")
+@SpringBootTest(classes = ReplayServerApplication.class)
+@ActiveProfiles({"dev", "real"})
 @EnabledIfSystemProperty(named = "replay.real-env.test", matches = "true")
 class ReplayRealEnvironmentTest {
 
@@ -57,7 +62,7 @@ class ReplayRealEnvironmentTest {
 
     private static final long END_SIM_TIME = 4_000L;
 
-    private static final int REPLAY_FRAME_COUNT = 3;
+    private static final long JUMP_TARGET_SIM_TIME = 2_600L;
 
     private static final String CREATE_STABLE_SQL_TEMPLATE =
             "CREATE STABLE IF NOT EXISTS %s (ts TIMESTAMP, simtime BIGINT, rawdata VARBINARY(8192)) "
@@ -77,10 +82,13 @@ class ReplayRealEnvironmentTest {
     private ReplayMessageConstants messageConstants;
 
     @Autowired
-    private ReplayLifecycleService lifecycleService;
+    private ObjectProvider<ReplayGlobalBroadcastListener> globalBroadcastListenerProvider;
 
     @Autowired
     private ReplaySessionManager sessionManager;
+
+    @Autowired
+    private ReplayTopicSubscriptionManager subscriptionManager;
 
     @Autowired
     private ReplayMetrics replayMetrics;
@@ -99,18 +107,20 @@ class ReplayRealEnvironmentTest {
         String broadcastTopic = TopicConstants.buildInstanceBroadcastTopic(instanceId);
         String situationTopic = TopicConstants.buildInstanceSituationTopic(instanceId);
         List<ProtocolData> receivedFrames = Collections.synchronizedList(new ArrayList<ProtocolData>());
+        assertRealProfileConfiguration();
         ensureTdengineDatabaseExists();
-        prepareRecordedReplayData(instanceId);
+        List<ExpectedFrame> expectedFrames = prepareRecordedReplayData(instanceId);
         DefaultMQProducer producer = null;
         DefaultMQPushConsumer situationConsumer = null;
         try {
             producer = createProducer();
+            ensureTopicExists(producer, TopicConstants.GLOBAL_BROADCAST_TOPIC);
             ensureTopicExists(producer, broadcastTopic);
             ensureTopicExists(producer, situationTopic);
             situationConsumer = createSituationConsumer(instanceId, receivedFrames);
             TimeUnit.SECONDS.sleep(2);
 
-            lifecycleService.createReplay(instanceId);
+            sendGlobalLifecycle(producer, messageConstants.getGlobalCreateMessageCode(), instanceId);
             waitUntil("回放会话进入 READY 状态", 30, new BooleanSupplier() {
                 /**
                  * 判断会话是否进入 READY。
@@ -124,53 +134,20 @@ class ReplayRealEnvironmentTest {
                             .orElse(false);
                 }
             });
-
-            sendControl(producer, instanceId, messageConstants.getInstanceStartMessageCode(), "{}");
-            waitUntil("回放会话进入 RUNNING 状态", 30, new BooleanSupplier() {
+            waitUntil("实例控制 topic 完成动态订阅", 30, new BooleanSupplier() {
                 /**
-                 * 判断会话是否进入 RUNNING。
+                 * 判断实例控制 topic 是否已订阅。
                  *
-                 * @return 是否进入 RUNNING。
+                 * @return 是否已订阅。
                  */
                 @Override
                 public boolean getAsBoolean() {
-                    return sessionManager.getSession(instanceId)
-                            .map(session -> session.getState() == ReplaySessionState.RUNNING)
-                            .orElse(false);
+                    return subscriptionManager.isSubscribed(instanceId);
                 }
             });
 
-            sendControl(producer, instanceId, messageConstants.getInstancePauseMessageCode(), "{}");
-            waitUntil("回放会话进入 PAUSED 状态", 30, new BooleanSupplier() {
-                /**
-                 * 判断会话是否进入 PAUSED。
-                 *
-                 * @return 是否进入 PAUSED。
-                 */
-                @Override
-                public boolean getAsBoolean() {
-                    return sessionManager.getSession(instanceId)
-                            .map(session -> session.getState() == ReplaySessionState.PAUSED)
-                            .orElse(false);
-                }
-            });
-
-            sendControl(producer, instanceId, messageConstants.getInstanceRateMessageCode(), "{\"rate\":2.0}");
-            waitUntil("回放倍率更新为 2.0", 30, new BooleanSupplier() {
-                /**
-                 * 判断回放倍率是否更新。
-                 *
-                 * @return 是否已更新。
-                 */
-                @Override
-                public boolean getAsBoolean() {
-                    return sessionManager.getSession(instanceId)
-                            .map(session -> Math.abs(session.getRate() - 2.0D) < 0.0001D)
-                            .orElse(false);
-                }
-            });
-
-            sendControl(producer, instanceId, messageConstants.getInstanceResumeMessageCode(), "{}");
+            sendControl(producer, instanceId, messageConstants.getInstanceJumpMessageCode(),
+                    "{\"time\":" + JUMP_TARGET_SIM_TIME + "}");
             waitUntil("真实回放态势消息发布完成", 30, new BooleanSupplier() {
                 /**
                  * 判断态势消息是否发布完成。
@@ -179,21 +156,19 @@ class ReplayRealEnvironmentTest {
                  */
                 @Override
                 public boolean getAsBoolean() {
-                    return receivedFrames.size() >= REPLAY_FRAME_COUNT;
+                    return receivedFrames.size() >= expectedFrames.size();
                 }
             });
-
-            waitUntil("回放水位推进到结束时间", 30, new BooleanSupplier() {
+            waitUntil("回放水位推进到跳转目标时间", 30, new BooleanSupplier() {
                 /**
-                 * 判断回放水位是否到达结束时间。
+                 * 判断回放水位是否到达跳转目标时间。
                  *
-                 * @return 是否到达结束时间。
+                 * @return 是否到达跳转目标时间。
                  */
                 @Override
                 public boolean getAsBoolean() {
                     return sessionManager.getSession(instanceId)
-                            .map(session -> session.getLastDispatchedSimTime() >= END_SIM_TIME
-                                    || session.getState() == ReplaySessionState.COMPLETED)
+                            .map(session -> session.getLastDispatchedSimTime() == JUMP_TARGET_SIM_TIME)
                             .orElse(false);
                 }
             });
@@ -201,14 +176,27 @@ class ReplayRealEnvironmentTest {
             Optional<ReplaySession> sessionOptional = sessionManager.getSession(instanceId);
             Assertions.assertTrue(sessionOptional.isPresent(), "回放会话不存在");
             ReplaySession session = sessionOptional.get();
-            Assertions.assertTrue(session.getLastDispatchedSimTime() >= END_SIM_TIME
-                            || session.getState() == ReplaySessionState.COMPLETED,
-                    "回放水位或完成状态不符合预期");
-            Assertions.assertEquals(REPLAY_FRAME_COUNT, receivedFrames.size(), "真实回放消息数量不符合预期");
-            Assertions.assertTrue(replayMetrics.publishedSuccessCount() >= REPLAY_FRAME_COUNT,
+            Assertions.assertEquals(JUMP_TARGET_SIM_TIME, session.getLastDispatchedSimTime(),
+                    "跳转后的回放水位不符合预期");
+            assertPublishedFrames(expectedFrames, receivedFrames);
+            Assertions.assertTrue(replayMetrics.publishedSuccessCount() >= expectedFrames.size(),
                     "发布成功指标未达到预期");
+
+            sendGlobalLifecycle(producer, messageConstants.getGlobalStopMessageCode(), instanceId);
+            waitUntil("全局 stop 释放回放会话", 30, new BooleanSupplier() {
+                /**
+                 * 判断回放会话是否已释放。
+                 *
+                 * @return 是否已释放。
+                 */
+                @Override
+                public boolean getAsBoolean() {
+                    return !sessionManager.getSession(instanceId).isPresent();
+                }
+            });
+            Assertions.assertFalse(subscriptionManager.isSubscribed(instanceId), "全局 stop 后实例订阅未释放");
         } finally {
-            lifecycleService.stopReplay(instanceId);
+            stopByGlobalMessageQuietly(producer, instanceId);
             shutdownQuietly(situationConsumer);
             if (producer != null) {
                 producer.shutdown();
@@ -220,8 +208,9 @@ class ReplayRealEnvironmentTest {
      * 准备真实 TDengine 回放数据。
      *
      * @param instanceId 实例 ID。
+     * @return 期望发布帧。
      */
-    private void prepareRecordedReplayData(String instanceId) {
+    private List<ExpectedFrame> prepareRecordedReplayData(String instanceId) {
         String stableName = TdengineNaming.buildStableName(instanceId);
         String timeControlTableName = TdengineNaming.buildTimeControlTableName(instanceId);
         jdbcTemplate.execute(String.format(CREATE_STABLE_SQL_TEMPLATE, stableName));
@@ -236,9 +225,12 @@ class ReplayRealEnvironmentTest {
                 replayServerProperties.getReplay().getQuery().getStopMessageCode());
 
         // 写入真实态势子表数据，供 ReplayFrameRepository 通过 TDengine 查询后回放。
-        insertReplayFrame(instanceId, 1001, 1, 7, 1_500L);
-        insertReplayFrame(instanceId, 1002, 2, 8, 2_000L);
+        ExpectedFrame eventAt1500 = insertReplayFrame(instanceId, 1001, 1, 7, 1_500L);
+        ExpectedFrame eventAt1800 = insertReplayFrame(instanceId, 1002, 8, 4, 1_800L);
+        ExpectedFrame eventAt2500 = insertReplayFrame(instanceId, 1001, 2, 6, 2_500L);
+        ExpectedFrame periodicAt2600 = insertReplayFrame(instanceId, 1003, 3, 9, 2_600L);
         insertReplayFrame(instanceId, 1003, 3, 9, 3_000L);
+        return Arrays.asList(eventAt1500, eventAt1800, eventAt2500, periodicAt2600);
     }
 
     /**
@@ -249,12 +241,13 @@ class ReplayRealEnvironmentTest {
      * @param messageCode 消息编号。
      * @param senderId 发送方 ID。
      * @param simTime 仿真时间。
+     * @return 写入帧对应的期望值。
      */
-    private void insertReplayFrame(String instanceId,
-                                   int messageType,
-                                   int messageCode,
-                                   int senderId,
-                                   long simTime) {
+    private ExpectedFrame insertReplayFrame(String instanceId,
+                                            int messageType,
+                                            int messageCode,
+                                            int senderId,
+                                            long simTime) {
         String stableName = TdengineNaming.buildStableName(instanceId);
         String tableName = TdengineNaming.buildSubTableName(instanceId, messageType, messageCode, senderId);
         byte[] rawData = ("{\"instanceId\":\"" + instanceId + "\",\"simTime\":" + simTime + "}")
@@ -262,6 +255,7 @@ class ReplayRealEnvironmentTest {
         jdbcTemplate.update("INSERT INTO " + tableName + " USING " + stableName
                         + " TAGS (?, ?, ?) VALUES (NOW, ?, ?)",
                 senderId, messageType, messageCode, simTime, rawData);
+        return new ExpectedFrame(senderId, messageType, messageCode, simTime, rawData);
     }
 
     /**
@@ -321,6 +315,25 @@ class ReplayRealEnvironmentTest {
     }
 
     /**
+     * 发送全局生命周期消息。
+     *
+     * @param producer RocketMQ 生产者。
+     * @param messageCode 消息编号。
+     * @param instanceId 实例 ID。
+     * @throws Exception 消息发送异常。
+     */
+    private void sendGlobalLifecycle(DefaultMQProducer producer, int messageCode, String instanceId) throws Exception {
+        byte[] rawData = ("{\"instanceId\":\"" + instanceId + "\"}").getBytes(StandardCharsets.UTF_8);
+        producer.send(new Message(
+                TopicConstants.GLOBAL_BROADCAST_TOPIC,
+                ProtocolMessageUtil.buildData(
+                        0,
+                        (short) messageConstants.getGlobalMessageType(),
+                        messageCode,
+                        rawData)));
+    }
+
+    /**
      * 发送实例控制消息。
      *
      * @param producer RocketMQ 生产者。
@@ -340,6 +353,68 @@ class ReplayRealEnvironmentTest {
                         (short) messageConstants.getInstanceControlMessageType(),
                         messageCode,
                         rawJson.getBytes(StandardCharsets.UTF_8))));
+    }
+
+    /**
+     * 断言 real profile 与全局监听器真实生效。
+     */
+    private void assertRealProfileConfiguration() {
+        Assertions.assertTrue(replayServerProperties.getRocketmq().isEnableGlobalListener(),
+                "真实环境 profile 必须启用全局监听器");
+        Assertions.assertNotNull(globalBroadcastListenerProvider.getIfAvailable(),
+                "真实环境测试必须加载 ReplayGlobalBroadcastListener");
+    }
+
+    /**
+     * 校验真实发布帧内容、协议字段、顺序和重复。
+     *
+     * @param expectedFrames 期望帧。
+     * @param receivedFrames 实际帧。
+     */
+    private void assertPublishedFrames(List<ExpectedFrame> expectedFrames, List<ProtocolData> receivedFrames) {
+        Assertions.assertEquals(expectedFrames.size(), receivedFrames.size(), "真实回放消息数量不符合预期");
+        Set<String> uniqueKeys = new HashSet<String>();
+        for (int index = 0; index < expectedFrames.size(); index++) {
+            ExpectedFrame expectedFrame = expectedFrames.get(index);
+            ProtocolData actualFrame = receivedFrames.get(index);
+            Assertions.assertTrue(uniqueKeys.add(toFrameKey(actualFrame)), "真实回放消息存在重复帧");
+            Assertions.assertEquals(expectedFrame.getSenderId(), actualFrame.getSenderId(), "senderId 映射不符合预期");
+            Assertions.assertEquals(expectedFrame.getMessageType(), actualFrame.getMessageType(), "messageType 映射不符合预期");
+            Assertions.assertEquals(expectedFrame.getMessageCode(), actualFrame.getMessageCode(), "messageCode 映射不符合预期");
+            Assertions.assertArrayEquals(expectedFrame.getRawData(), actualFrame.getRawData(), "rawData 不符合预期");
+            Assertions.assertEquals(expectedFrame.getSimTime(), readSimTime(actualFrame), "rawData.simTime 不符合预期");
+        }
+    }
+
+    /**
+     * 读取协议数据中的仿真时间。
+     *
+     * @param protocolData 协议数据。
+     * @return 仿真时间。
+     */
+    private long readSimTime(ProtocolData protocolData) {
+        JsonNode jsonNode = JsonUtil.readTree(protocolData.getRawData());
+        JsonNode simTimeNode = jsonNode.get("simTime");
+        if (simTimeNode == null || !simTimeNode.isNumber()) {
+            throw new IllegalArgumentException("rawData 缺少数值字段 simTime");
+        }
+        return simTimeNode.asLong();
+    }
+
+    /**
+     * 生成真实回放帧去重键。
+     *
+     * @param protocolData 协议数据。
+     * @return 去重键。
+     */
+    private String toFrameKey(ProtocolData protocolData) {
+        return protocolData.getSenderId()
+                + "|"
+                + protocolData.getMessageType()
+                + "|"
+                + protocolData.getMessageCode()
+                + "|"
+                + new String(protocolData.getRawData(), StandardCharsets.UTF_8);
     }
 
     /**
@@ -447,6 +522,34 @@ class ReplayRealEnvironmentTest {
     }
 
     /**
+     * 通过全局 stop 消息尽力清理真实回放会话。
+     *
+     * @param producer RocketMQ 生产者。
+     * @param instanceId 实例 ID。
+     */
+    private void stopByGlobalMessageQuietly(DefaultMQProducer producer, String instanceId) {
+        if (producer == null || !sessionManager.getSession(instanceId).isPresent()) {
+            return;
+        }
+        try {
+            sendGlobalLifecycle(producer, messageConstants.getGlobalStopMessageCode(), instanceId);
+            waitUntil("清理回放会话", 10, new BooleanSupplier() {
+                /**
+                 * 判断回放会话是否已清理。
+                 *
+                 * @return 是否已清理。
+                 */
+                @Override
+                public boolean getAsBoolean() {
+                    return !sessionManager.getSession(instanceId).isPresent();
+                }
+            });
+        } catch (Exception ignored) {
+            // 清理阶段不覆盖原始失败原因。
+        }
+    }
+
+    /**
      * 静默关闭 RocketMQ 消费者。
      *
      * @param consumer RocketMQ 消费者。
@@ -459,6 +562,84 @@ class ReplayRealEnvironmentTest {
             consumer.shutdown();
         } catch (RuntimeException ignored) {
             // 测试清理阶段只做尽力关闭，避免覆盖原始断言结果。
+        }
+    }
+
+    /**
+     * 真实回放期望帧。
+     */
+    private static final class ExpectedFrame {
+
+        private final int senderId;
+
+        private final int messageType;
+
+        private final int messageCode;
+
+        private final long simTime;
+
+        private final byte[] rawData;
+
+        /**
+         * 创建真实回放期望帧。
+         *
+         * @param senderId 发送方 ID。
+         * @param messageType 消息类型。
+         * @param messageCode 消息编号。
+         * @param simTime 仿真时间。
+         * @param rawData 原始数据。
+         */
+        private ExpectedFrame(int senderId, int messageType, int messageCode, long simTime, byte[] rawData) {
+            this.senderId = senderId;
+            this.messageType = messageType;
+            this.messageCode = messageCode;
+            this.simTime = simTime;
+            this.rawData = rawData;
+        }
+
+        /**
+         * 获取发送方 ID。
+         *
+         * @return 发送方 ID。
+         */
+        private int getSenderId() {
+            return senderId;
+        }
+
+        /**
+         * 获取消息类型。
+         *
+         * @return 消息类型。
+         */
+        private int getMessageType() {
+            return messageType;
+        }
+
+        /**
+         * 获取消息编号。
+         *
+         * @return 消息编号。
+         */
+        private int getMessageCode() {
+            return messageCode;
+        }
+
+        /**
+         * 获取仿真时间。
+         *
+         * @return 仿真时间。
+         */
+        private long getSimTime() {
+            return simTime;
+        }
+
+        /**
+         * 获取原始数据。
+         *
+         * @return 原始数据。
+         */
+        private byte[] getRawData() {
+            return rawData;
         }
     }
 }

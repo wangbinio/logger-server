@@ -1,7 +1,3 @@
-spring:
-  profiles:
-    include: dev
-
 replay-server:
   rocketmq:
-    enable-global-listener: false
+    enable-global-listener: true
