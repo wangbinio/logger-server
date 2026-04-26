@@ -53,3 +53,27 @@
 ## 6. 当前无需澄清的问题
 
 本阶段没有阻塞性疑问。
+
+## 7. Review
+
+### 7.1 实际改动
+
+- 新增 `ReplayClock`，支持从记录的仿真开始时间启动、暂停冻结、继续推进、倍率调整、时间跳转和 `[startTime, endTime]` 边界限制。
+- 新增 `ReplaySessionState`，定义 `PREPARING`、`READY`、`RUNNING`、`PAUSED`、`STOPPED`、`COMPLETED`、`FAILED`，并将 `STOPPED`、`COMPLETED`、`FAILED` 识别为终态。
+- 新增 `ReplaySession` 聚合根，保存时间范围、事件表、周期表、回放时钟、状态、水位、订阅句柄、游标和发布统计；状态变更方法使用同步保护，终态后不允许迁移到其他状态。
+- 新增 `ReplaySessionManager`，基于 `ConcurrentHashMap` 管理回放会话，支持幂等创建、查询、停止、移除已停止会话和会话数量统计。
+- 在 `ReplayServerApplication` 注册 `ReplaySessionManager` Bean，保证后续 Phase 04/05 服务层可以直接注入会话管理器。
+- 新增 `ReplayClockTest`、`ReplaySessionStateTest`、`ReplaySessionTest`、`ReplaySessionManagerTest`，并补充应用上下文对 `ReplaySessionManager` Bean 的加载验证。
+
+### 7.2 验证结果
+
+- 已按 TDD 流程先新增 Phase 03 测试，并确认生产类缺失导致测试编译失败。
+- 已执行 Phase 03 定向测试：`mvn -pl replay-server -am -DfailIfNoTests=false -Dtest='ReplayClockTest,ReplaySessionStateTest,ReplaySessionTest,ReplaySessionManagerTest' test`，13 个测试全部通过。
+- 已执行阶段测试：`mvn -pl replay-server -am test`，`common` 12 个测试、`replay-server` 56 个测试全部通过。
+- 已执行完整回归：`mvn test`，`common`、`logger-server`、`replay-server` 全部构建成功；`logger-server` 59 个测试中 1 个真实环境开关测试按既有机制跳过，`replay-server` 56 个测试全部通过。
+
+### 7.3 遗留风险
+
+- 本阶段只实现内存领域模型，不接入 TDengine 查询结果装配、不启动调度器、不发布 RocketMQ 消息。
+- `lastDispatchedSimTime` 已提供显式推进方法并限制不能回退、不能超过结束时间；真正的“仅发布成功后推进”需要在 Phase 04 的发布调度中落地调用约束。
+- 时间跳转目前只同步回放时钟，不执行事件补偿和周期快照发布；补发语义留给 Phase 05。
