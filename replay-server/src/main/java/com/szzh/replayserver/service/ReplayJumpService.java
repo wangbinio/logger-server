@@ -8,6 +8,7 @@ import com.szzh.replayserver.model.query.ReplayFrame;
 import com.szzh.replayserver.model.query.ReplayTableDescriptor;
 import com.szzh.replayserver.mq.ReplaySituationPublisher;
 import com.szzh.replayserver.repository.ReplayFrameRepository;
+import com.szzh.replayserver.support.metric.ReplayMetrics;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
@@ -29,6 +30,8 @@ public class ReplayJumpService {
 
     private final ReplaySituationPublisher situationPublisher;
 
+    private final ReplayMetrics replayMetrics;
+
     private final int pageSize;
 
     /**
@@ -38,16 +41,19 @@ public class ReplayJumpService {
      * @param frameMergeService 回放帧归并服务。
      * @param situationPublisher 回放态势发布器。
      * @param properties 回放服务配置。
+     * @param replayMetrics 回放指标。
      */
     @Autowired
     public ReplayJumpService(ReplayFrameRepository frameRepository,
                              ReplayFrameMergeService frameMergeService,
                              ReplaySituationPublisher situationPublisher,
-                             ReplayServerProperties properties) {
+                             ReplayServerProperties properties,
+                             ReplayMetrics replayMetrics) {
         this(frameRepository,
                 frameMergeService,
                 situationPublisher,
-                properties.getReplay().getQuery().getPageSize());
+                properties.getReplay().getQuery().getPageSize(),
+                replayMetrics);
     }
 
     /**
@@ -62,9 +68,27 @@ public class ReplayJumpService {
                              ReplayFrameMergeService frameMergeService,
                              ReplaySituationPublisher situationPublisher,
                              int pageSize) {
+        this(frameRepository, frameMergeService, situationPublisher, pageSize, new ReplayMetrics());
+    }
+
+    /**
+     * 创建回放时间跳转服务。
+     *
+     * @param frameRepository 回放帧 Repository。
+     * @param frameMergeService 回放帧归并服务。
+     * @param situationPublisher 回放态势发布器。
+     * @param pageSize 查询分页大小。
+     * @param replayMetrics 回放指标。
+     */
+    public ReplayJumpService(ReplayFrameRepository frameRepository,
+                             ReplayFrameMergeService frameMergeService,
+                             ReplaySituationPublisher situationPublisher,
+                             int pageSize,
+                             ReplayMetrics replayMetrics) {
         this.frameRepository = Objects.requireNonNull(frameRepository, "frameRepository 不能为空");
         this.frameMergeService = Objects.requireNonNull(frameMergeService, "frameMergeService 不能为空");
         this.situationPublisher = Objects.requireNonNull(situationPublisher, "situationPublisher 不能为空");
+        this.replayMetrics = Objects.requireNonNull(replayMetrics, "replayMetrics 不能为空");
         this.pageSize = Math.max(1, pageSize);
     }
 
@@ -78,6 +102,7 @@ public class ReplayJumpService {
         ReplaySession replaySession = Objects.requireNonNull(session, "session 不能为空");
         synchronized (replaySession) {
             if (!isJumpAccepted(replaySession.getState())) {
+                replayMetrics.recordStateConflict();
                 return;
             }
             long currentTime = replaySession.getReplayClock().currentTime();
@@ -91,6 +116,7 @@ public class ReplayJumpService {
                 publishPeriodicSnapshots(replaySession, targetTime);
                 replaySession.jumpTo(targetTime);
                 replaySession.syncLastDispatchedSimTime(targetTime);
+                replayMetrics.recordJump();
                 if (wasRunning) {
                     replaySession.resume();
                 }
@@ -112,9 +138,9 @@ public class ReplayJumpService {
      */
     private void publishJumpEvents(ReplaySession session, long currentTime, long targetTime) {
         if (targetTime < currentTime) {
-            publishFrames(session, queryBackwardEventFrames(session, targetTime));
+            publishFrames(session, querySafely(() -> queryBackwardEventFrames(session, targetTime)));
         } else if (targetTime > currentTime) {
-            publishFrames(session, queryForwardEventFrames(session, currentTime, targetTime));
+            publishFrames(session, querySafely(() -> queryForwardEventFrames(session, currentTime, targetTime)));
         }
     }
 
@@ -220,6 +246,17 @@ public class ReplayJumpService {
      * @param targetTime 目标回放时间。
      */
     private void publishPeriodicSnapshots(ReplaySession session, long targetTime) {
+        publishFrames(session, querySafely(() -> queryPeriodicSnapshots(session, targetTime)));
+    }
+
+    /**
+     * 查询周期表目标时间前最后一帧。
+     *
+     * @param session 回放会话。
+     * @param targetTime 目标回放时间。
+     * @return 周期表快照帧。
+     */
+    private List<ReplayFrame> queryPeriodicSnapshots(ReplaySession session, long targetTime) {
         List<ReplayFrame> snapshots = new ArrayList<ReplayFrame>();
         for (ReplayTableDescriptor table : session.getPeriodicTables()) {
             Optional<ReplayFrame> frame = frameRepository.findPeriodicLastFrame(table, targetTime);
@@ -227,7 +264,7 @@ public class ReplayJumpService {
                 snapshots.add(frame.get());
             }
         }
-        publishFrames(session, frameMergeService.merge(Collections.singletonList(snapshots)));
+        return frameMergeService.merge(Collections.singletonList(snapshots));
     }
 
     /**
@@ -238,7 +275,23 @@ public class ReplayJumpService {
      */
     private void publishFrames(ReplaySession session, List<ReplayFrame> frames) {
         for (ReplayFrame frame : frames) {
+            // 发布跳转补偿帧或周期快照帧。
             situationPublisher.publish(session.getInstanceId(), frame);
+        }
+    }
+
+    /**
+     * 执行 TDengine 查询并记录查询失败指标。
+     *
+     * @param query 回放查询动作。
+     * @return 查询结果帧。
+     */
+    private List<ReplayFrame> querySafely(FrameQuery query) {
+        try {
+            return query.query();
+        } catch (RuntimeException exception) {
+            replayMetrics.recordQueryFailure();
+            throw exception;
         }
     }
 
@@ -269,5 +322,18 @@ public class ReplayJumpService {
             return session.getSimulationEndTime();
         }
         return requestedTime;
+    }
+
+    /**
+     * 回放帧查询动作。
+     */
+    private interface FrameQuery {
+
+        /**
+         * 执行回放帧查询。
+         *
+         * @return 回放帧列表。
+         */
+        List<ReplayFrame> query();
     }
 }

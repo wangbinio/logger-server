@@ -13,6 +13,8 @@ import com.szzh.replayserver.mq.ReplayLifecycleCommandPort;
 import com.szzh.replayserver.mq.ReplayTopicSubscriptionManager;
 import com.szzh.replayserver.repository.ReplayTableDiscoveryRepository;
 import com.szzh.replayserver.repository.ReplayTimeControlRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -24,6 +26,8 @@ import java.util.Objects;
  */
 @Service
 public class ReplayLifecycleService implements ReplayLifecycleCommandPort {
+
+    private static final Logger log = LoggerFactory.getLogger(ReplayLifecycleService.class);
 
     private final ReplaySessionManager sessionManager;
 
@@ -112,14 +116,23 @@ public class ReplayLifecycleService implements ReplayLifecycleCommandPort {
                 filterTables(classifiedTables, ReplayTableType.EVENT),
                 filterTables(classifiedTables, ReplayTableType.PERIODIC));
         try {
+            // 建立实例级回放控制订阅。
             subscriptionManager.subscribe(instanceId);
             session.setBroadcastConsumerHandle(TopicConstants.buildInstanceBroadcastTopic(instanceId));
             session.markReady();
+
+            // 发布回放元信息通知。
             metadataService.publishMetadata(session);
+
+            log.info("result=replay_create_success instanceId={} topic={} messageType=-1 messageCode=-1 senderId=-1 currentReplayTime={} lastDispatchedSimTime={} rate={} replayState={}",
+                    instanceId, TopicConstants.buildInstanceBroadcastTopic(instanceId), session.getReplayClock().currentTime(), session.getLastDispatchedSimTime(), session.getRate(), session.getState());
             return session;
         } catch (RuntimeException exception) {
             subscriptionManager.unsubscribe(instanceId);
             markFailedIfActive(session, exception);
+
+            log.warn("result=replay_create_failed instanceId={} topic={} messageType=-1 messageCode=-1 senderId=-1 currentReplayTime={} lastDispatchedSimTime={} rate={} replayState={} reason={}",
+                    instanceId, TopicConstants.buildInstanceBroadcastTopic(instanceId), session.getReplayClock().currentTime(), session.getLastDispatchedSimTime(), session.getRate(), session.getState(), exception.getMessage());
             throw exception;
         }
     }
@@ -130,10 +143,18 @@ public class ReplayLifecycleService implements ReplayLifecycleCommandPort {
      * @param instanceId 实例 ID。
      */
     public void stopReplay(String instanceId) {
+        ReplaySession session = sessionManager.getSession(instanceId).orElse(null);
+
+        // 停止连续回放调度并释放实例级控制订阅。
         scheduler.cancel(instanceId);
         sessionManager.stopSession(instanceId);
         subscriptionManager.unsubscribe(instanceId);
         sessionManager.removeSession(instanceId);
+
+        if (session != null) {
+            log.info("result=replay_stop_success instanceId={} topic={} messageType=-1 messageCode=-1 senderId=-1 currentReplayTime={} lastDispatchedSimTime={} rate={} replayState={}",
+                    instanceId, TopicConstants.buildInstanceBroadcastTopic(instanceId), session.getReplayClock().currentTime(), session.getLastDispatchedSimTime(), session.getRate(), session.getState());
+        }
     }
 
     /**

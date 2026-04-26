@@ -50,3 +50,29 @@
 ## 6. 当前无需澄清的问题
 
 本阶段没有阻塞性疑问。
+
+## 7. Review
+
+### 7.1 实际改动
+
+- 新增 `ReplayMetrics` 内存级指标，覆盖活跃会话数、发布成功数、发布失败数、查询失败数、跳转次数和状态冲突数。
+- 将指标接入回放发布、连续调度查询失败、跳转查询失败和控制状态冲突路径。
+- 新增 `ReplayFlowIntegrationTest`，使用 Mock Repository 与 Mock RocketMQ Sender 覆盖创建、元信息发布、启动、暂停、继续、倍速、向前跳转、向后跳转和停止。
+- 新增 `ReplayRealEnvironmentTest`，通过 `-Dreplay.real-env.test=true` 显式启用真实环境测试；测试直接使用当前 YAML 的 TDengine 与 RocketMQ 配置，写入真实 TDengine 控制点和态势数据，再通过真实控制 topic 驱动回放并验证真实态势 topic 发布。
+- 新增 `application-test.yml` 与 `application-real.yml` 测试资源，真实环境测试默认禁用自动全局监听器。
+- 补齐生命周期、控制、调度失败和发布失败路径的结构化日志字段。
+- 更新 `005-final.md`、`development-steps.md` 与 `ARCHITECTURE.md`，同步 Phase 06 实际落地状态。
+
+### 7.2 验证结果
+
+- `mvn -pl replay-server -am "-Dtest=ReplayMetricsTest,ReplaySituationPublisherTest,ReplaySchedulerTest,ReplayControlServiceTest,ReplayJumpServiceTest" -DfailIfNoTests=false test` 通过，21 个测试成功。
+- `mvn -pl replay-server -am "-Dtest=ReplayFlowIntegrationTest" -DfailIfNoTests=false test` 通过，Mock 全链路集成测试成功。
+- `mvn -pl replay-server -am "-Dtest=ReplayRealEnvironmentTest" -DfailIfNoTests=false test` 通过，真实环境测试默认跳过。
+- `mvn -pl replay-server -am "-Dtest=ReplayRealEnvironmentTest" "-Dreplay.real-env.test=true" -DfailIfNoTests=false test` 通过，真实 TDengine 与 RocketMQ 回放链路成功。
+- `mvn test` 通过，全工程 91 个常规测试成功，1 个真实环境测试按默认策略跳过。
+
+### 7.3 遗留风险
+
+- 真实环境测试会在当前 TDengine `logger` 库中留下 `replay-real-it-*` 测试表，便于后续复查真实回放数据。
+- 第一版仍不支持 `sourceInstanceId` 与 `replayInstanceId` 分离，同一实例不能并发记录和回放。
+- 第一版未引入外部指标系统，`ReplayMetrics` 仍是内存级计数器。

@@ -8,6 +8,7 @@ import com.szzh.replayserver.model.query.ReplayFrame;
 import com.szzh.replayserver.model.query.ReplayTableDescriptor;
 import com.szzh.replayserver.mq.ReplaySituationPublisher;
 import com.szzh.replayserver.repository.ReplayFrameRepository;
+import com.szzh.replayserver.support.metric.ReplayMetrics;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -38,6 +39,8 @@ public class ReplayScheduler {
 
     private final ReplaySituationPublisher situationPublisher;
 
+    private final ReplayMetrics replayMetrics;
+
     private final int pageSize;
 
     private final long tickMillis;
@@ -54,17 +57,20 @@ public class ReplayScheduler {
      * @param frameMergeService 回放帧归并服务。
      * @param situationPublisher 回放态势发布器。
      * @param properties 回放服务配置。
+     * @param replayMetrics 回放指标。
      */
     @Autowired
     public ReplayScheduler(ReplayFrameRepository frameRepository,
                            ReplayFrameMergeService frameMergeService,
                            ReplaySituationPublisher situationPublisher,
-                           ReplayServerProperties properties) {
+                           ReplayServerProperties properties,
+                           ReplayMetrics replayMetrics) {
         this(frameRepository,
                 frameMergeService,
                 situationPublisher,
                 properties.getReplay().getQuery().getPageSize(),
-                properties.getReplay().getScheduler().getTickMillis());
+                properties.getReplay().getScheduler().getTickMillis(),
+                replayMetrics);
     }
 
     /**
@@ -81,9 +87,29 @@ public class ReplayScheduler {
                            ReplaySituationPublisher situationPublisher,
                            int pageSize,
                            long tickMillis) {
+        this(frameRepository, frameMergeService, situationPublisher, pageSize, tickMillis, new ReplayMetrics());
+    }
+
+    /**
+     * 创建回放连续窗口调度器。
+     *
+     * @param frameRepository 回放帧查询 Repository。
+     * @param frameMergeService 回放帧归并服务。
+     * @param situationPublisher 回放态势发布器。
+     * @param pageSize 查询分页大小。
+     * @param tickMillis 调度间隔。
+     * @param replayMetrics 回放指标。
+     */
+    public ReplayScheduler(ReplayFrameRepository frameRepository,
+                           ReplayFrameMergeService frameMergeService,
+                           ReplaySituationPublisher situationPublisher,
+                           int pageSize,
+                           long tickMillis,
+                           ReplayMetrics replayMetrics) {
         this.frameRepository = Objects.requireNonNull(frameRepository, "frameRepository 不能为空");
         this.frameMergeService = Objects.requireNonNull(frameMergeService, "frameMergeService 不能为空");
         this.situationPublisher = Objects.requireNonNull(situationPublisher, "situationPublisher 不能为空");
+        this.replayMetrics = Objects.requireNonNull(replayMetrics, "replayMetrics 不能为空");
         this.pageSize = Math.max(1, pageSize);
         this.tickMillis = Math.max(1L, tickMillis);
         this.executorService = Executors.newSingleThreadScheduledExecutor(runnable -> {
@@ -138,13 +164,23 @@ public class ReplayScheduler {
             return;
         }
 
+        List<List<ReplayFrame>> framePages;
         try {
-            List<List<ReplayFrame>> framePages = queryWindowFrames(replaySession, fromExclusive, toInclusive);
+            // 查询当前回放窗口内的 TDengine 帧数据。
+            framePages = queryWindowFrames(replaySession, fromExclusive, toInclusive);
+        } catch (RuntimeException exception) {
+            replayMetrics.recordQueryFailure();
+            markFailedIfActive(replaySession, exception);
+            throw exception;
+        }
+
+        try {
             List<ReplayFrame> frames = frameMergeService.merge(framePages);
             for (ReplayFrame frame : frames) {
                 if (replaySession.getState() != ReplaySessionState.RUNNING) {
                     return;
                 }
+                // 发布单帧回放态势数据。
                 situationPublisher.publish(replaySession.getInstanceId(), frame);
             }
             replaySession.addDispatchedFrameCount(frames.size());
@@ -173,8 +209,8 @@ public class ReplayScheduler {
         try {
             tick(session);
         } catch (RuntimeException exception) {
-            log.warn("result=replay_scheduler_tick_failed instanceId={} topic=- messageType=-1 messageCode=-1 senderId=-1 simtime={} sessionState={} reason={}",
-                    session.getInstanceId(), session.getReplayClock().currentTime(), session.getState(), exception.getMessage());
+            log.warn("result=replay_scheduler_tick_failed instanceId={} topic=- messageType=-1 messageCode=-1 senderId=-1 currentReplayTime={} lastDispatchedSimTime={} rate={} replayState={} reason={}",
+                    session.getInstanceId(), session.getReplayClock().currentTime(), session.getLastDispatchedSimTime(), session.getRate(), session.getState(), exception.getMessage());
         }
     }
 

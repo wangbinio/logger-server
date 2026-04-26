@@ -11,6 +11,7 @@ import com.szzh.replayserver.model.query.ReplayTableType;
 import com.szzh.replayserver.model.query.ReplayTimeRange;
 import com.szzh.replayserver.mq.ReplaySituationPublisher;
 import com.szzh.replayserver.repository.ReplayFrameRepository;
+import com.szzh.replayserver.support.metric.ReplayMetrics;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -78,13 +79,14 @@ class ReplayJumpServiceTest {
         ReplayFrame periodicSnapshot = frame(periodicTable, 1_600L);
         ReplayFrameRepository repository = Mockito.mock(ReplayFrameRepository.class);
         ReplaySituationPublisher publisher = Mockito.mock(ReplaySituationPublisher.class);
+        ReplayMetrics metrics = new ReplayMetrics();
         Mockito.when(repository.findForwardJumpEventFrames(Mockito.eq(eventTable), Mockito.eq(1_200L),
                         Mockito.eq(1_700L), Mockito.any(ReplayCursor.class)))
                 .thenReturn(Collections.singletonList(eventAtTarget));
         Mockito.when(repository.findPeriodicLastFrame(periodicTable, 1_700L))
                 .thenReturn(Optional.of(periodicSnapshot));
         ReplayJumpService jumpService =
-                new ReplayJumpService(repository, new ReplayFrameMergeService(), publisher, 2);
+                new ReplayJumpService(repository, new ReplayFrameMergeService(), publisher, 2, metrics);
 
         jumpService.jump(session, 1_700L);
 
@@ -92,6 +94,7 @@ class ReplayJumpServiceTest {
         Mockito.verify(publisher, Mockito.times(2)).publish(Mockito.eq("instance-001"), captor.capture());
         Assertions.assertEquals(Arrays.asList(eventAtTarget, periodicSnapshot), captor.getAllValues());
         Assertions.assertEquals(1_700L, session.getLastDispatchedSimTime());
+        Assertions.assertEquals(1L, metrics.jumpCount());
     }
 
     /**
@@ -145,6 +148,29 @@ class ReplayJumpServiceTest {
         Assertions.assertEquals(1_500L, session.getLastDispatchedSimTime());
         Assertions.assertEquals(1_500L, session.getReplayClock().currentTime());
         Assertions.assertEquals(ReplaySessionState.PAUSED, session.getState());
+    }
+
+    /**
+     * 验证跳转查询异常会记录查询失败指标且不记录成功跳转。
+     */
+    @Test
+    void shouldRecordQueryFailureWhenJumpRepositoryThrows() {
+        AtomicLong wallClock = new AtomicLong(1_000L);
+        ReplaySession session = runningSession(wallClock);
+        wallClock.set(1_500L);
+        ReplayFrameRepository repository = Mockito.mock(ReplayFrameRepository.class);
+        ReplaySituationPublisher publisher = Mockito.mock(ReplaySituationPublisher.class);
+        ReplayMetrics metrics = new ReplayMetrics();
+        Mockito.when(repository.findBackwardJumpEventFrames(Mockito.eq(eventTable), Mockito.eq(1_000L),
+                        Mockito.eq(1_200L), Mockito.any(ReplayCursor.class)))
+                .thenThrow(new IllegalStateException("tdengine boom"));
+        ReplayJumpService jumpService =
+                new ReplayJumpService(repository, new ReplayFrameMergeService(), publisher, 2, metrics);
+
+        Assertions.assertThrows(IllegalStateException.class, () -> jumpService.jump(session, 1_200L));
+
+        Assertions.assertEquals(1L, metrics.queryFailureCount());
+        Assertions.assertEquals(0L, metrics.jumpCount());
     }
 
     /**

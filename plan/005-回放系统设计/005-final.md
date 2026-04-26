@@ -1486,6 +1486,16 @@ mvn test -Dreplay.real-env.test=true
 
 常规 CI 不依赖真实外部服务。
 
+### 19.4 Phase 06 验证落地
+
+Phase 06 已按第一版验收目标补齐以下测试与验证：
+
+- `ReplayMetricsTest` 覆盖活跃会话数、发布成功数、发布失败数、查询失败数、跳转次数和状态冲突数。
+- `ReplayFlowIntegrationTest` 使用 Mock Repository 与 Mock RocketMQ Sender 覆盖创建、元信息发布、启动、暂停、继续、倍速、向前跳转、向后跳转和停止。
+- `ReplayRealEnvironmentTest` 通过 `-Dreplay.real-env.test=true` 显式启用，直接使用当前 YAML 中的 TDengine 与 RocketMQ 配置，先向 TDengine 写入真实回放数据和控制时间点，再通过真实 `broadcast-{instanceId}` 控制 topic 驱动回放，并从真实 `situation-{instanceId}` topic 验证回放发布。
+- 常规 `mvn test` 默认跳过真实环境测试，避免外部依赖影响 CI 稳定性。
+- 回放关键日志已补齐 `result`、`instanceId`、`topic`、`messageType`、`messageCode`、`senderId`、`currentReplayTime`、`lastDispatchedSimTime`、`rate` 和 `replayState` 等字段。
+
 ## 20. 实施步骤
 
 ### 阶段一：模块拆分

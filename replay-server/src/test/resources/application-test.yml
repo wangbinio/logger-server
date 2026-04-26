@@ -1,0 +1,12 @@
+spring:
+  autoconfigure:
+    exclude: org.apache.rocketmq.spring.autoconfigure.RocketMQAutoConfiguration
+
+replay-server:
+  rocketmq:
+    enable-global-listener: false
+  tdengine:
+    jdbc-url: jdbc:TAOS-WS://127.0.0.1:6041/logger?timezone=UTC-8&charset=utf-8&varcharAsString=true
+    username: root
+    password: taosdata
+    driver-class-name: com.taosdata.jdbc.ws.WebSocketDriver

@@ -11,6 +11,7 @@ import com.szzh.replayserver.model.query.ReplayTableType;
 import com.szzh.replayserver.model.query.ReplayTimeRange;
 import com.szzh.replayserver.mq.ReplaySituationPublisher;
 import com.szzh.replayserver.repository.ReplayFrameRepository;
+import com.szzh.replayserver.support.metric.ReplayMetrics;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -106,6 +107,29 @@ class ReplaySchedulerTest {
 
         Assertions.assertEquals(ReplaySessionState.FAILED, session.getState());
         Assertions.assertEquals(1_000L, session.getLastDispatchedSimTime());
+    }
+
+    /**
+     * 验证查询异常会记录查询失败指标。
+     */
+    @Test
+    void shouldRecordQueryFailureWhenRepositoryThrows() {
+        AtomicLong wallClock = new AtomicLong(1_000L);
+        ReplaySession session = runningSession(wallClock);
+        wallClock.set(1_500L);
+        ReplayFrameRepository repository = Mockito.mock(ReplayFrameRepository.class);
+        ReplaySituationPublisher publisher = Mockito.mock(ReplaySituationPublisher.class);
+        ReplayMetrics metrics = new ReplayMetrics();
+        Mockito.when(repository.findWindowFrames(Mockito.eq(eventTable), Mockito.eq(1_000L), Mockito.eq(1_500L),
+                        Mockito.any(ReplayCursor.class)))
+                .thenThrow(new IllegalStateException("tdengine boom"));
+        ReplayScheduler scheduler =
+                new ReplayScheduler(repository, new ReplayFrameMergeService(), publisher, 10, 50L, metrics);
+
+        Assertions.assertThrows(IllegalStateException.class, () -> scheduler.tick(session));
+
+        Assertions.assertEquals(1L, metrics.queryFailureCount());
+        Assertions.assertEquals(ReplaySessionState.FAILED, session.getState());
     }
 
     /**

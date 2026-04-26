@@ -8,6 +8,7 @@ import com.szzh.replayserver.domain.session.ReplaySessionState;
 import com.szzh.replayserver.model.query.ReplayTableDescriptor;
 import com.szzh.replayserver.model.query.ReplayTableType;
 import com.szzh.replayserver.model.query.ReplayTimeRange;
+import com.szzh.replayserver.support.metric.ReplayMetrics;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
@@ -103,6 +104,21 @@ class ReplayControlServiceTest {
     }
 
     /**
+     * 验证非法状态控制会记录状态冲突指标。
+     */
+    @Test
+    void shouldRecordStateConflictWhenControlRejected() {
+        Fixture fixture = new Fixture();
+        fixture.readySession();
+
+        fixture.service.handlePause("instance-001", protocolData("{}"));
+        fixture.service.handleResume("missing", protocolData("{}"));
+
+        Assertions.assertEquals(2L, fixture.metrics.stateConflictCount());
+        Mockito.verifyNoInteractions(fixture.scheduler);
+    }
+
+    /**
      * 构建协议数据。
      *
      * @param json JSON 载荷。
@@ -127,8 +143,10 @@ class ReplayControlServiceTest {
 
         private final ReplayJumpService jumpService = Mockito.mock(ReplayJumpService.class);
 
+        private final ReplayMetrics metrics = new ReplayMetrics();
+
         private final ReplayControlService service =
-                new ReplayControlService(sessionManager, scheduler, jumpService);
+                new ReplayControlService(sessionManager, scheduler, jumpService, metrics);
 
         /**
          * 创建 READY 会话。

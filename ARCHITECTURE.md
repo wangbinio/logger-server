@@ -54,6 +54,16 @@ flowchart LR
 - 领域层：`SimulationSessionManager`、`SimulationSession`、`SimulationClock`、`SimulationSessionState`。
 - 基础设施层：`RocketMqConsumerFactory`、`TdengineConfig`、`TdengineSchemaService`、`TdengineWriteService`。
 
+当前工程已经拆分为 Maven 多模块：
+
+| 模块 | 职责 |
+| --- | --- |
+| `common` | 承载平台协议、JSON 工具、Topic 命名和 TDengine 命名等公共能力。 |
+| `logger-server` | 负责仿真实例记录，只消费并写入原始态势数据。 |
+| `replay-server` | 负责从 TDengine 查询已记录数据，并按回放控制命令重新发布到 RocketMQ。 |
+
+`logger-server` 与 `replay-server` 共享 `common`，但业务状态机、时钟、TDengine 查询和 RocketMQ 发布逻辑相互独立。
+
 ## 4. 包结构
 
 | 包 | 职责 |
@@ -246,6 +256,8 @@ v0.1 覆盖以下测试层级：
 - 生命周期、控制服务、态势记录服务测试。
 - 创建、启动、暂停、继续、停止、态势写入的主流程集成测试。
 - 可选真实环境完整测试，通过系统属性 `logger.real-env.test=true` 启用。
+- 回放侧 Mock 全链路集成测试，覆盖创建、元信息、启动、暂停、继续、倍速、跳转和停止。
+- 回放侧真实环境测试，通过系统属性 `replay.real-env.test=true` 启用，使用当前 YAML 中的 TDengine 与 RocketMQ 配置。
 
 常规验证命令：
 
@@ -254,7 +266,45 @@ mvn -q test
 mvn -q package
 ```
 
-## 12. v0.1 范围
+## 12. replay-server 架构补充
+
+`replay-server` 独立启动，不依赖 Redis，也不订阅 `situation-{instanceId}`。它固定监听 `broadcast-global` 中的回放任务管理消息，并在创建回放任务后只动态订阅 `broadcast-{instanceId}` 控制 topic。
+
+核心链路：
+
+```mermaid
+flowchart LR
+    TDengine["TDengine"]
+    GlobalTopic["broadcast-global"]
+    ControlTopic["broadcast-{instanceId}"]
+    SituationTopic["situation-{instanceId}"]
+    ReplayGlobalListener["ReplayGlobalBroadcastListener"]
+    ReplayLifecycle["ReplayLifecycleService"]
+    ReplayControlHandler["ReplayInstanceBroadcastMessageHandler"]
+    ReplayControl["ReplayControlService"]
+    ReplayJump["ReplayJumpService"]
+    ReplayScheduler["ReplayScheduler"]
+    ReplayPublisher["ReplaySituationPublisher"]
+    ReplaySession["ReplaySessionManager"]
+    ReplayRepository["ReplayFrameRepository"]
+
+    GlobalTopic --> ReplayGlobalListener --> ReplayLifecycle --> ReplaySession
+    ReplayLifecycle --> ControlTopic --> ReplayControlHandler --> ReplayControl
+    ReplayControl --> ReplayJump --> ReplayRepository --> TDengine
+    ReplayControl --> ReplayScheduler --> ReplayRepository
+    ReplayScheduler --> ReplayPublisher --> SituationTopic
+    ReplayJump --> ReplayPublisher
+```
+
+回放侧关键边界：
+
+- 创建回放任务时读取 `time_control_{instanceId}` 和 `situation_{instanceId}`，计算起止时间并发现态势子表。
+- 连续回放使用 `(lastDispatchedSimTime, currentReplayTime]` 窗口查询，发布成功后才推进水位。
+- 时间跳转期间暂停调度窗口推进，向前跳转发布 `(currentTime, targetTime]` 事件，向后跳转发布 `[simulationStartTime, targetTime]` 事件，周期表发布目标时间前最后一帧。
+- `ReplayMetrics` 当前为内存级计数器，覆盖活跃会话、发布成功、发布失败、查询失败、跳转次数和状态冲突。
+- 真实环境验证默认跳过，显式加 `-Dreplay.real-env.test=true` 才会访问真实 TDengine 和 RocketMQ。
+
+## 13. v0.1 范围
 
 已包含：
 

@@ -5,6 +5,7 @@ import com.szzh.common.protocol.ProtocolData;
 import com.szzh.common.protocol.ProtocolMessageUtil;
 import com.szzh.common.topic.TopicConstants;
 import com.szzh.replayserver.model.query.ReplayFrame;
+import com.szzh.replayserver.support.metric.ReplayMetrics;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -21,7 +22,8 @@ class ReplaySituationPublisherTest {
     @Test
     void shouldPublishFrameToSituationTopicWithRebuiltProtocolBody() {
         ReplayRocketMqSender sender = Mockito.mock(ReplayRocketMqSender.class);
-        ReplaySituationPublisher publisher = new ReplaySituationPublisher(sender, 1);
+        ReplayMetrics metrics = new ReplayMetrics();
+        ReplaySituationPublisher publisher = new ReplaySituationPublisher(sender, 1, metrics);
         ReplayFrame frame = new ReplayFrame("situation_1001_2_7_instance_001",
                 7, 1001, 2, 1_200L, new byte[]{1, 2, 3});
 
@@ -36,6 +38,8 @@ class ReplaySituationPublisherTest {
         Assertions.assertEquals(1001, protocolData.getMessageType());
         Assertions.assertEquals(2, protocolData.getMessageCode());
         Assertions.assertArrayEquals(new byte[]{1, 2, 3}, protocolData.getRawData());
+        Assertions.assertEquals(1L, metrics.publishedSuccessCount());
+        Assertions.assertEquals(0L, metrics.publishedFailureCount());
     }
 
     /**
@@ -61,14 +65,17 @@ class ReplaySituationPublisherTest {
     @Test
     void shouldThrowBusinessExceptionWhenRetryExhausted() {
         ReplayRocketMqSender sender = Mockito.mock(ReplayRocketMqSender.class);
+        ReplayMetrics metrics = new ReplayMetrics();
         Mockito.doThrow(new IllegalStateException("send boom"))
                 .when(sender)
                 .send(Mockito.anyString(), Mockito.any(byte[].class));
-        ReplaySituationPublisher publisher = new ReplaySituationPublisher(sender, 3);
+        ReplaySituationPublisher publisher = new ReplaySituationPublisher(sender, 3, metrics);
 
         Assertions.assertThrows(BusinessException.class,
                 () -> publisher.publish("instance-001",
                         new ReplayFrame("table_a", 7, 1001, 2, 1_200L, new byte[]{1})));
         Mockito.verify(sender, Mockito.times(3)).send(Mockito.anyString(), Mockito.any(byte[].class));
+        Assertions.assertEquals(0L, metrics.publishedSuccessCount());
+        Assertions.assertEquals(1L, metrics.publishedFailureCount());
     }
 }
