@@ -4,8 +4,15 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.context.properties.bind.Bindable;
 import org.springframework.boot.context.properties.bind.Binder;
+import org.springframework.boot.context.properties.source.ConfigurationPropertySources;
 import org.springframework.boot.context.properties.source.MapConfigurationPropertySource;
+import org.springframework.boot.env.YamlPropertySourceLoader;
+import org.springframework.core.env.MutablePropertySources;
+import org.springframework.core.env.PropertySource;
+import org.springframework.core.io.ClassPathResource;
 
+import java.io.IOException;
+import java.util.List;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -37,6 +44,26 @@ class ReplayServerPropertiesTest {
         Assertions.assertEquals(50L, properties.getReplay().getScheduler().getTickMillis());
         Assertions.assertEquals(500, properties.getReplay().getPublish().getBatchSize());
         Assertions.assertEquals(3, properties.getReplay().getPublish().getRetryTimes());
+    }
+
+    /**
+     * 验证主配置文件包含设计要求的事件类消息配置。
+     *
+     * @throws IOException 配置读取异常。
+     */
+    @Test
+    void shouldLoadDesignEventMessagesFromApplicationYaml() throws IOException {
+        ReplayServerProperties properties = bindApplicationYaml();
+
+        Assertions.assertEquals(2, properties.getReplay().getEventMessages().size());
+        Assertions.assertEquals(1001, properties.getReplay().getEventMessages().get(0).getMessageType());
+        Assertions.assertEquals(3, properties.getReplay().getEventMessages().get(0).getMessageCodes().size());
+        Assertions.assertTrue(properties.getReplay().getEventMessages().get(0).getMessageCodes().contains(1));
+        Assertions.assertTrue(properties.getReplay().getEventMessages().get(0).getMessageCodes().contains(2));
+        Assertions.assertTrue(properties.getReplay().getEventMessages().get(0).getMessageCodes().contains(3));
+        Assertions.assertEquals(1002, properties.getReplay().getEventMessages().get(1).getMessageType());
+        Assertions.assertEquals(1, properties.getReplay().getEventMessages().get(1).getMessageCodes().size());
+        Assertions.assertTrue(properties.getReplay().getEventMessages().get(1).getMessageCodes().contains(8));
     }
 
     /**
@@ -72,5 +99,23 @@ class ReplayServerPropertiesTest {
         Assertions.assertEquals(200, properties.getReplay().getQuery().getPageSize());
         Assertions.assertEquals(12, properties.getReplay().getQuery().getStopMessageType());
         Assertions.assertEquals(34, properties.getReplay().getQuery().getStopMessageCode());
+    }
+
+    /**
+     * 绑定主配置文件。
+     *
+     * @return 回放服务配置。
+     * @throws IOException 配置读取异常。
+     */
+    private ReplayServerProperties bindApplicationYaml() throws IOException {
+        MutablePropertySources propertySources = new MutablePropertySources();
+        List<PropertySource<?>> yamlPropertySources = new YamlPropertySourceLoader()
+                .load("application", new ClassPathResource("application.yml"));
+        for (PropertySource<?> propertySource : yamlPropertySources) {
+            propertySources.addLast(propertySource);
+        }
+        return new Binder(ConfigurationPropertySources.from(propertySources))
+                .bind("replay-server", Bindable.of(ReplayServerProperties.class))
+                .orElseThrow(IllegalStateException::new);
     }
 }

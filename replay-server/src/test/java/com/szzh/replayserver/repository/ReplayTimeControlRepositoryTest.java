@@ -7,8 +7,12 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mockito;
+import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.dao.EmptyResultDataAccessException;
+import org.springframework.jdbc.BadSqlGrammarException;
 import org.springframework.jdbc.core.JdbcTemplate;
+
+import java.sql.SQLException;
 
 /**
  * 回放控制时间点查询测试。
@@ -84,6 +88,52 @@ class ReplayTimeControlRepositoryTest {
 
         Assertions.assertEquals(100L, range.getStartTime());
         Assertions.assertEquals(420L, range.getEndTime());
+    }
+
+    /**
+     * 验证控制时间点表不存在时降级查询态势表起止时间。
+     */
+    @Test
+    void shouldFallbackToSituationRangeWhenTimeControlTableMissing() {
+        JdbcTemplate jdbcTemplate = Mockito.mock(JdbcTemplate.class);
+        ReplayTimeControlRepository repository = new ReplayTimeControlRepository(jdbcTemplate, new ReplayServerProperties());
+        BadSqlGrammarException missingTableException = new BadSqlGrammarException(
+                "query",
+                "SELECT simtime FROM time_control_instance_001",
+                new SQLException("Table time_control_instance_001 does not exist"));
+        Mockito.when(jdbcTemplate.queryForObject(Mockito.contains("WHERE rate > 0"), Mockito.eq(Long.class)))
+                .thenThrow(missingTableException);
+        Mockito.when(jdbcTemplate.queryForObject(Mockito.contains("MIN(simtime)"), Mockito.eq(Long.class)))
+                .thenReturn(120L);
+        Mockito.when(jdbcTemplate.queryForObject(
+                        Mockito.contains("WHERE msgtype = ? AND msgcode = ?"),
+                        Mockito.eq(Long.class),
+                        Mockito.eq(0),
+                        Mockito.eq(1)))
+                .thenThrow(missingTableException);
+        Mockito.when(jdbcTemplate.queryForObject(Mockito.contains("MAX(simtime)"), Mockito.eq(Long.class)))
+                .thenReturn(420L);
+
+        ReplayTimeRange range = repository.resolveTimeRange("instance-001");
+
+        Assertions.assertEquals(120L, range.getStartTime());
+        Assertions.assertEquals(420L, range.getEndTime());
+    }
+
+    /**
+     * 验证 TDengine 连接失败不会被误判为控制表缺失。
+     */
+    @Test
+    void shouldPropagateConnectionFailureWithoutFallback() {
+        JdbcTemplate jdbcTemplate = Mockito.mock(JdbcTemplate.class);
+        ReplayTimeControlRepository repository = new ReplayTimeControlRepository(jdbcTemplate, new ReplayServerProperties());
+        Mockito.when(jdbcTemplate.queryForObject(Mockito.contains("WHERE rate > 0"), Mockito.eq(Long.class)))
+                .thenThrow(new DataAccessResourceFailureException("connection failed"));
+
+        Assertions.assertThrows(DataAccessResourceFailureException.class,
+                () -> repository.resolveTimeRange("instance-001"));
+        Mockito.verify(jdbcTemplate, Mockito.never())
+                .queryForObject(Mockito.contains("MIN(simtime)"), Mockito.eq(Long.class));
     }
 
     /**

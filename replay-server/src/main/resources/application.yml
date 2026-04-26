@@ -26,6 +26,11 @@ replay-server:
         jump-message-code: 5
         metadata-message-code: 9
   replay:
+    event-messages:
+      - message-type: 1001
+        message-codes: [1, 2, 3]
+      - message-type: 1002
+        message-codes: [8]
     query:
       page-size: 1000
     scheduler:

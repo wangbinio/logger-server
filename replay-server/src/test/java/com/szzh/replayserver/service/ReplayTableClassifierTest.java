@@ -50,6 +50,34 @@ class ReplayTableClassifierTest {
     }
 
     /**
+     * 验证设计默认事件配置能命中事件表。
+     */
+    @Test
+    void shouldClassifyDesignDefaultEventMessages() {
+        ReplayServerProperties properties = new ReplayServerProperties();
+        ReplayServerProperties.EventMessage firstEventMessage = new ReplayServerProperties.EventMessage();
+        firstEventMessage.setMessageType(1001);
+        firstEventMessage.setMessageCodes(Arrays.asList(1, 2, 3));
+        ReplayServerProperties.EventMessage secondEventMessage = new ReplayServerProperties.EventMessage();
+        secondEventMessage.setMessageType(1002);
+        secondEventMessage.setMessageCodes(Collections.singletonList(8));
+        properties.getReplay().getEventMessages().add(firstEventMessage);
+        properties.getReplay().getEventMessages().add(secondEventMessage);
+        ReplayTableClassifier classifier = new ReplayTableClassifier(properties);
+
+        List<ReplayTableDescriptor> result = classifier.classify(Arrays.asList(
+                descriptor(1001, 1),
+                descriptor(1001, 3),
+                descriptor(1002, 8),
+                descriptor(1002, 9)));
+
+        Assertions.assertEquals(ReplayTableType.EVENT, result.get(0).getTableType());
+        Assertions.assertEquals(ReplayTableType.EVENT, result.get(1).getTableType());
+        Assertions.assertEquals(ReplayTableType.EVENT, result.get(2).getTableType());
+        Assertions.assertEquals(ReplayTableType.PERIODIC, result.get(3).getTableType());
+    }
+
+    /**
      * 创建测试子表描述。
      *
      * @param messageType 消息类型。
