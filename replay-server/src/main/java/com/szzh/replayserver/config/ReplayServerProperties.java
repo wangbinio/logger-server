@@ -133,6 +133,10 @@ public class ReplayServerProperties {
     public static class Query {
 
         private int pageSize = 1000;
+
+        private int stopMessageType = 0;
+
+        private int stopMessageCode = 1;
     }
 
     /**

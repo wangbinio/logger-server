@@ -32,6 +32,8 @@ class ReplayServerPropertiesTest {
         Assertions.assertEquals("replay-producer", properties.getRocketmq().getProducerGroup());
         Assertions.assertTrue(properties.getRocketmq().isEnableGlobalListener());
         Assertions.assertEquals(1000, properties.getReplay().getQuery().getPageSize());
+        Assertions.assertEquals(0, properties.getReplay().getQuery().getStopMessageType());
+        Assertions.assertEquals(1, properties.getReplay().getQuery().getStopMessageCode());
         Assertions.assertEquals(50L, properties.getReplay().getScheduler().getTickMillis());
         Assertions.assertEquals(500, properties.getReplay().getPublish().getBatchSize());
         Assertions.assertEquals(3, properties.getReplay().getPublish().getRetryTimes());
@@ -52,6 +54,8 @@ class ReplayServerPropertiesTest {
         values.put("replay-server.protocol.messages.control.message-type", "2200");
         values.put("replay-server.protocol.messages.control.rate-message-code", "44");
         values.put("replay-server.replay.query.page-size", "200");
+        values.put("replay-server.replay.query.stop-message-type", "12");
+        values.put("replay-server.replay.query.stop-message-code", "34");
 
         ReplayServerProperties properties = new Binder(new MapConfigurationPropertySource(values))
                 .bind("replay-server", Bindable.of(ReplayServerProperties.class))
@@ -66,5 +70,7 @@ class ReplayServerPropertiesTest {
         Assertions.assertEquals(2200, properties.getProtocol().getMessages().getControl().getMessageType());
         Assertions.assertEquals(44, properties.getProtocol().getMessages().getControl().getRateMessageCode());
         Assertions.assertEquals(200, properties.getReplay().getQuery().getPageSize());
+        Assertions.assertEquals(12, properties.getReplay().getQuery().getStopMessageType());
+        Assertions.assertEquals(34, properties.getReplay().getQuery().getStopMessageCode());
     }
 }
