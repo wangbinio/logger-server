@@ -82,14 +82,8 @@ public class TdengineWriteService {
                 return;
             } catch (RuntimeException exception) {
                 lastException = exception;
-                log.warn("result=write_retry_failed instanceId={} topic=- messageType={} messageCode={} senderId={} simtime={} costMs=-1 attempt={} reason={}",
-                        validatedCommand.getInstanceId(),
-                        validatedCommand.getMessageType(),
-                        validatedCommand.getMessageCode(),
-                        validatedCommand.getSenderId(),
-                        validatedCommand.getSimTime(),
-                        attempt + 1,
-                        exception.getMessage());
+
+                logWriteRetryFailed(validatedCommand, attempt + 1, exception);
             }
         }
         throw BusinessException.tdengineWrite("TDengine 单条写入失败", lastException);
@@ -116,15 +110,8 @@ public class TdengineWriteService {
                 return;
             } catch (RuntimeException exception) {
                 lastException = exception;
-                log.warn("result=time_control_write_retry_failed instanceId={} topic=- messageType={} messageCode={} senderId={} simtime={} rate={} attempt={} reason={}",
-                        validatedCommand.getInstanceId(),
-                        validatedCommand.getMessageType(),
-                        validatedCommand.getMessageCode(),
-                        validatedCommand.getSenderId(),
-                        validatedCommand.getSimTime(),
-                        validatedCommand.getRate(),
-                        attempt + 1,
-                        exception.getMessage());
+
+                logTimeControlWriteRetryFailed(validatedCommand, attempt + 1, exception);
             }
         }
         throw BusinessException.tdengineWrite("TDengine 控制时间点写入失败", lastException);
@@ -222,5 +209,31 @@ public class TdengineWriteService {
             throw new IllegalArgumentException("控制时间点写入命令不能为空");
         }
         return command;
+    }
+
+    /**
+     * 输出态势记录重试失败日志。
+     *
+     * @param command 写入命令。
+     * @param attempt 重试序号。
+     * @param exception 写入异常。
+     */
+    private void logWriteRetryFailed(SituationRecordCommand command, int attempt, RuntimeException exception) {
+        log.warn("result=write_retry_failed instanceId={} topic=- messageType={} messageCode={} senderId={} simtime={} costMs=-1 attempt={} reason={}",
+                command.getInstanceId(), command.getMessageType(), command.getMessageCode(), command.getSenderId(), command.getSimTime(), attempt, exception.getMessage());
+    }
+
+    /**
+     * 输出控制时间点重试失败日志。
+     *
+     * @param command 控制时间点写入命令。
+     * @param attempt 重试序号。
+     * @param exception 写入异常。
+     */
+    private void logTimeControlWriteRetryFailed(TimeControlRecordCommand command,
+                                                int attempt,
+                                                RuntimeException exception) {
+        log.warn("result=time_control_write_retry_failed instanceId={} topic=- messageType={} messageCode={} senderId={} simtime={} rate={} attempt={} reason={}",
+                command.getInstanceId(), command.getMessageType(), command.getMessageCode(), command.getSenderId(), command.getSimTime(), command.getRate(), attempt, exception.getMessage());
     }
 }

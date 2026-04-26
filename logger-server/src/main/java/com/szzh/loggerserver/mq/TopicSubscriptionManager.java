@@ -210,11 +210,7 @@ public class TopicSubscriptionManager implements DisposableBean {
                     situationMessageHandler.handle(instanceId, message);
                 }
             } catch (Exception exception) {
-                log.warn("RocketMQ 消息处理失败，instanceId={}, topic={}, msgId={}",
-                        instanceId,
-                        message.getTopic(),
-                        message.getMsgId(),
-                        exception);
+                logMessageHandleFailed(instanceId, message, exception);
                 return ConsumeConcurrentlyStatus.RECONSUME_LATER;
             }
         }
@@ -235,8 +231,31 @@ public class TopicSubscriptionManager implements DisposableBean {
         try {
             consumer.shutdown();
         } catch (Exception exception) {
-            log.warn("关闭 RocketMQ 消费者失败，instanceId={}, channelType={}", instanceId, channelType, exception);
+            logConsumerShutdownFailed(instanceId, channelType, exception);
         }
+    }
+
+    /**
+     * 输出 RocketMQ 消息处理失败日志。
+     *
+     * @param instanceId 实例 ID。
+     * @param message RocketMQ 原始消息。
+     * @param exception 处理异常。
+     */
+    private void logMessageHandleFailed(String instanceId, MessageExt message, Exception exception) {
+        log.warn("RocketMQ 消息处理失败，instanceId={}, topic={}, msgId={}",
+                instanceId, message.getTopic(), message.getMsgId(), exception);
+    }
+
+    /**
+     * 输出 RocketMQ 消费者关闭失败日志。
+     *
+     * @param instanceId 实例 ID。
+     * @param channelType 通道类型。
+     * @param exception 关闭异常。
+     */
+    private void logConsumerShutdownFailed(String instanceId, String channelType, Exception exception) {
+        log.warn("关闭 RocketMQ 消费者失败，instanceId={}, channelType={}", instanceId, channelType, exception);
     }
 
     /**

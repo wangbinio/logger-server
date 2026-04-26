@@ -99,20 +99,15 @@ public class GlobalBroadcastListener implements RocketMQListener<MessageExt> {
             protocolData = parse(messageExt);
         } catch (ProtocolParseException exception) {
             loggerMetrics.recordProtocolParseFailure();
-            log.warn("result=protocol_parse_failed instanceId=- topic={} messageType=-1 messageCode=-1 senderId=-1 simtime=-1 reason={}",
-                    messageExt == null ? TopicConstants.GLOBAL_BROADCAST_TOPIC : messageExt.getTopic(),
-                    exception.getMessage());
+
+            logProtocolParseFailed(messageExt, exception);
             return;
         }
         if (!messageConstants.isGlobalLifecycleMessage(protocolData.getMessageType())) {
             return;
         }
         if (simulationLifecycleCommandPort == null) {
-            log.debug("result=port_missing instanceId=- topic={} messageType={} messageCode={} senderId={} simtime=-1",
-                    TopicConstants.GLOBAL_BROADCAST_TOPIC,
-                    protocolData.getMessageType(),
-                    protocolData.getMessageCode(),
-                    protocolData.getSenderId());
+            logPortMissing(protocolData);
             return;
         }
         try {
@@ -125,21 +120,12 @@ public class GlobalBroadcastListener implements RocketMQListener<MessageExt> {
                 return;
             }
             loggerMetrics.recordStateViolation();
-            log.debug("result=ignored_unknown_message instanceId=- topic={} messageType={} messageCode={} senderId={} simtime=-1",
-                    TopicConstants.GLOBAL_BROADCAST_TOPIC,
-                    protocolData.getMessageType(),
-                    protocolData.getMessageCode(),
-                    protocolData.getSenderId());
+
+            logIgnoredUnknownMessage(protocolData);
         } catch (BusinessException exception) {
             logByBusinessException("-", TopicConstants.GLOBAL_BROADCAST_TOPIC, protocolData, exception);
         } catch (RuntimeException exception) {
-            log.error("result=unexpected_exception instanceId=- topic={} messageType={} messageCode={} senderId={} simtime=-1 reason={}",
-                    TopicConstants.GLOBAL_BROADCAST_TOPIC,
-                    protocolData.getMessageType(),
-                    protocolData.getMessageCode(),
-                    protocolData.getSenderId(),
-                    exception.getMessage(),
-                    exception);
+            logUnexpectedException(protocolData, exception);
         }
     }
 
@@ -157,6 +143,48 @@ public class GlobalBroadcastListener implements RocketMQListener<MessageExt> {
     }
 
     /**
+     * 输出协议解析失败日志。
+     *
+     * @param messageExt RocketMQ 原始消息。
+     * @param exception 协议解析异常。
+     */
+    private void logProtocolParseFailed(MessageExt messageExt, ProtocolParseException exception) {
+        log.warn("result=protocol_parse_failed instanceId=- topic={} messageType=-1 messageCode=-1 senderId=-1 simtime=-1 reason={}",
+                messageExt == null ? TopicConstants.GLOBAL_BROADCAST_TOPIC : messageExt.getTopic(), exception.getMessage());
+    }
+
+    /**
+     * 输出生命周期端口缺失日志。
+     *
+     * @param protocolData 协议数据。
+     */
+    private void logPortMissing(ProtocolData protocolData) {
+        log.debug("result=port_missing instanceId=- topic={} messageType={} messageCode={} senderId={} simtime=-1",
+                TopicConstants.GLOBAL_BROADCAST_TOPIC, protocolData.getMessageType(), protocolData.getMessageCode(), protocolData.getSenderId());
+    }
+
+    /**
+     * 输出未知全局消息日志。
+     *
+     * @param protocolData 协议数据。
+     */
+    private void logIgnoredUnknownMessage(ProtocolData protocolData) {
+        log.debug("result=ignored_unknown_message instanceId=- topic={} messageType={} messageCode={} senderId={} simtime=-1",
+                TopicConstants.GLOBAL_BROADCAST_TOPIC, protocolData.getMessageType(), protocolData.getMessageCode(), protocolData.getSenderId());
+    }
+
+    /**
+     * 输出未预期异常日志。
+     *
+     * @param protocolData 协议数据。
+     * @param exception 运行时异常。
+     */
+    private void logUnexpectedException(ProtocolData protocolData, RuntimeException exception) {
+        log.error("result=unexpected_exception instanceId=- topic={} messageType={} messageCode={} senderId={} simtime=-1 reason={}",
+                TopicConstants.GLOBAL_BROADCAST_TOPIC, protocolData.getMessageType(), protocolData.getMessageCode(), protocolData.getSenderId(), exception.getMessage(), exception);
+    }
+
+    /**
      * 按业务异常分类输出统一日志。
      *
      * @param instanceId 实例 ID。
@@ -170,23 +198,10 @@ public class GlobalBroadcastListener implements RocketMQListener<MessageExt> {
                                         BusinessException exception) {
         if (exception.getCategory() == BusinessException.Category.TDENGINE_WRITE) {
             log.error("result=business_exception category={} instanceId={} topic={} messageType={} messageCode={} senderId={} simtime=-1 reason={}",
-                    exception.getCategory(),
-                    instanceId,
-                    topic,
-                    protocolData.getMessageType(),
-                    protocolData.getMessageCode(),
-                    protocolData.getSenderId(),
-                    exception.getMessage(),
-                    exception);
+                    exception.getCategory(), instanceId, topic, protocolData.getMessageType(), protocolData.getMessageCode(), protocolData.getSenderId(), exception.getMessage(), exception);
             return;
         }
         log.warn("result=business_exception category={} instanceId={} topic={} messageType={} messageCode={} senderId={} simtime=-1 reason={}",
-                exception.getCategory(),
-                instanceId,
-                topic,
-                protocolData.getMessageType(),
-                protocolData.getMessageCode(),
-                protocolData.getSenderId(),
-                exception.getMessage());
+                exception.getCategory(), instanceId, topic, protocolData.getMessageType(), protocolData.getMessageCode(), protocolData.getSenderId(), exception.getMessage());
     }
 }

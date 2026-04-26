@@ -112,12 +112,8 @@ public class SimulationLifecycleService implements SimulationLifecycleCommandPor
         Optional<SimulationSession> existingSession = sessionManager.getSession(payload.getInstanceId());
         if (existingSession.isPresent() && existingSession.get().getState() != SimulationSessionState.STOPPED) {
             loggerMetrics.recordStateViolation();
-            log.info("result=ignored_duplicate_create instanceId={} topic=- messageType={} messageCode={} senderId={} simtime=-1 sessionState={}",
-                    payload.getInstanceId(),
-                    protocolData.getMessageType(),
-                    protocolData.getMessageCode(),
-                    protocolData.getSenderId(),
-                    existingSession.get().getState());
+
+            logLifecycleResult("ignored_duplicate_create", payload.getInstanceId(), protocolData, existingSession.get().getState().name());
             return;
         }
 
@@ -128,23 +124,13 @@ public class SimulationLifecycleService implements SimulationLifecycleCommandPor
             subscriptionManager.subscribe(session.getInstanceId());
             session.updateState(SimulationSessionState.READY);
             loggerMetrics.setActiveSessionCount(sessionManager.size());
-            log.info("result=create_success instanceId={} topic=- messageType={} messageCode={} senderId={} simtime=-1 sessionState={}",
-                    session.getInstanceId(),
-                    protocolData.getMessageType(),
-                    protocolData.getMessageCode(),
-                    protocolData.getSenderId(),
-                    session.getState());
+
+            logLifecycleResult("create_success", session.getInstanceId(), protocolData, session.getState().name());
         } catch (RuntimeException exception) {
             markSessionFailed(session, exception);
             loggerMetrics.setActiveSessionCount(sessionManager.size());
-            log.error("result=create_failed instanceId={} topic=- messageType={} messageCode={} senderId={} simtime=-1 sessionState={} reason={}",
-                    session.getInstanceId(),
-                    protocolData.getMessageType(),
-                    protocolData.getMessageCode(),
-                    protocolData.getSenderId(),
-                    session.getState(),
-                    exception.getMessage(),
-                    exception);
+
+            logLifecycleFailed("create_failed", session.getInstanceId(), protocolData, session.getState().name(), exception);
             throw exception;
         }
     }
@@ -160,11 +146,8 @@ public class SimulationLifecycleService implements SimulationLifecycleCommandPor
         Optional<SimulationSession> sessionOptional = sessionManager.getSession(payload.getInstanceId());
         if (!sessionOptional.isPresent()) {
             loggerMetrics.recordStateViolation();
-            log.info("result=ignored_missing_stop instanceId={} topic=- messageType={} messageCode={} senderId={} simtime=-1 sessionState=MISSING",
-                    payload.getInstanceId(),
-                    protocolData.getMessageType(),
-                    protocolData.getMessageCode(),
-                    protocolData.getSenderId());
+
+            logLifecycleResult("ignored_missing_stop", payload.getInstanceId(), protocolData, "MISSING");
             return;
         }
 
@@ -174,11 +157,8 @@ public class SimulationLifecycleService implements SimulationLifecycleCommandPor
         sessionManager.stopSession(session.getInstanceId());
         sessionManager.removeSession(session.getInstanceId());
         loggerMetrics.setActiveSessionCount(sessionManager.size());
-        log.info("result=stop_success instanceId={} topic=- messageType={} messageCode={} senderId={} simtime=-1 sessionState=STOPPED",
-                session.getInstanceId(),
-                protocolData.getMessageType(),
-                protocolData.getMessageCode(),
-                protocolData.getSenderId());
+
+        logLifecycleResult("stop_success", session.getInstanceId(), protocolData, SimulationSessionState.STOPPED.name());
     }
 
     /**
@@ -217,24 +197,10 @@ public class SimulationLifecycleService implements SimulationLifecycleCommandPor
                 .build();
         try {
             tdengineWriteService.writeTimeControl(command);
-            log.debug("result=time_control_stop_write_success instanceId={} topic=- messageType={} messageCode={} senderId={} simtime={} rate={}",
-                    command.getInstanceId(),
-                    command.getMessageType(),
-                    command.getMessageCode(),
-                    command.getSenderId(),
-                    command.getSimTime(),
-                    command.getRate());
+
+            logStopTimeControlWriteSuccess(command);
         } catch (RuntimeException exception) {
-            log.error("result=time_control_stop_write_failed instanceId={} topic=- messageType={} messageCode={} senderId={} simtime={} rate={} sessionState={} reason={}",
-                    command.getInstanceId(),
-                    command.getMessageType(),
-                    command.getMessageCode(),
-                    command.getSenderId(),
-                    command.getSimTime(),
-                    command.getRate(),
-                    session.getState(),
-                    exception.getMessage(),
-                    exception);
+            logStopTimeControlWriteFailed(command, session, exception);
         }
     }
 
@@ -249,5 +215,63 @@ public class SimulationLifecycleService implements SimulationLifecycleCommandPor
             return 0L;
         }
         return session.getSimulationClock().currentSimTimeMillis();
+    }
+
+    /**
+     * 输出生命周期处理结果日志。
+     *
+     * @param result 处理结果。
+     * @param instanceId 实例 ID。
+     * @param protocolData 协议数据。
+     * @param sessionState 会话状态。
+     */
+    private void logLifecycleResult(String result,
+                                    String instanceId,
+                                    ProtocolData protocolData,
+                                    String sessionState) {
+        log.info("result={} instanceId={} topic=- messageType={} messageCode={} senderId={} simtime=-1 sessionState={}",
+                result, instanceId, protocolData.getMessageType(), protocolData.getMessageCode(), protocolData.getSenderId(), sessionState);
+    }
+
+    /**
+     * 输出生命周期失败日志。
+     *
+     * @param result 处理结果。
+     * @param instanceId 实例 ID。
+     * @param protocolData 协议数据。
+     * @param sessionState 会话状态。
+     * @param exception 运行时异常。
+     */
+    private void logLifecycleFailed(String result,
+                                    String instanceId,
+                                    ProtocolData protocolData,
+                                    String sessionState,
+                                    RuntimeException exception) {
+        log.error("result={} instanceId={} topic=- messageType={} messageCode={} senderId={} simtime=-1 sessionState={} reason={}",
+                result, instanceId, protocolData.getMessageType(), protocolData.getMessageCode(), protocolData.getSenderId(), sessionState, exception.getMessage(), exception);
+    }
+
+    /**
+     * 输出停止时间点写入成功日志。
+     *
+     * @param command 控制时间点写入命令。
+     */
+    private void logStopTimeControlWriteSuccess(TimeControlRecordCommand command) {
+        log.debug("result=time_control_stop_write_success instanceId={} topic=- messageType={} messageCode={} senderId={} simtime={} rate={}",
+                command.getInstanceId(), command.getMessageType(), command.getMessageCode(), command.getSenderId(), command.getSimTime(), command.getRate());
+    }
+
+    /**
+     * 输出停止时间点写入失败日志。
+     *
+     * @param command 控制时间点写入命令。
+     * @param session 会话对象。
+     * @param exception 写入异常。
+     */
+    private void logStopTimeControlWriteFailed(TimeControlRecordCommand command,
+                                               SimulationSession session,
+                                               RuntimeException exception) {
+        log.error("result=time_control_stop_write_failed instanceId={} topic=- messageType={} messageCode={} senderId={} simtime={} rate={} sessionState={} reason={}",
+                command.getInstanceId(), command.getMessageType(), command.getMessageCode(), command.getSenderId(), command.getSimTime(), command.getRate(), session.getState(), exception.getMessage(), exception);
     }
 }

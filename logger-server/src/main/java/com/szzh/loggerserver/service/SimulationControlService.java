@@ -105,13 +105,8 @@ public class SimulationControlService implements SimulationControlCommandPort {
                 }
             });
             recordTimeControlQuietly(session, protocolData, 1D);
-            log.info("result=start_success instanceId={} topic=- messageType={} messageCode={} senderId={} simtime={} sessionState={}",
-                    instanceId,
-                    protocolData.getMessageType(),
-                    protocolData.getMessageCode(),
-                    protocolData.getSenderId(),
-                    session.getSimulationClock().currentSimTimeMillis(),
-                    session.getState());
+
+            logControlResult("start_success", instanceId, protocolData, session);
             return;
         }
         if (session.getState() == SimulationSessionState.PAUSED) {
@@ -149,13 +144,8 @@ public class SimulationControlService implements SimulationControlCommandPort {
             }
         });
         recordTimeControlQuietly(session, protocolData, 0D);
-        log.info("result=pause_success instanceId={} topic=- messageType={} messageCode={} senderId={} simtime={} sessionState={}",
-                instanceId,
-                protocolData.getMessageType(),
-                protocolData.getMessageCode(),
-                protocolData.getSenderId(),
-                session.getSimulationClock().currentSimTimeMillis(),
-                session.getState());
+
+        logControlResult("pause_success", instanceId, protocolData, session);
     }
 
     /**
@@ -190,13 +180,8 @@ public class SimulationControlService implements SimulationControlCommandPort {
             }
         });
         recordTimeControlQuietly(session, protocolData, 1D);
-        log.info("result=resume_success instanceId={} topic=- messageType={} messageCode={} senderId={} simtime={} sessionState={}",
-                instanceId,
-                protocolData.getMessageType(),
-                protocolData.getMessageCode(),
-                protocolData.getSenderId(),
-                session.getSimulationClock().currentSimTimeMillis(),
-                session.getState());
+
+        logControlResult("resume_success", instanceId, protocolData, session);
     }
 
     /**
@@ -242,24 +227,10 @@ public class SimulationControlService implements SimulationControlCommandPort {
                 .build();
         try {
             tdengineWriteService.writeTimeControl(command);
-            log.debug("result=time_control_write_success instanceId={} topic=- messageType={} messageCode={} senderId={} simtime={} rate={}",
-                    command.getInstanceId(),
-                    command.getMessageType(),
-                    command.getMessageCode(),
-                    command.getSenderId(),
-                    command.getSimTime(),
-                    command.getRate());
+
+            logTimeControlWriteSuccess(command);
         } catch (RuntimeException exception) {
-            log.error("result=time_control_write_failed instanceId={} topic=- messageType={} messageCode={} senderId={} simtime={} rate={} sessionState={} reason={}",
-                    command.getInstanceId(),
-                    command.getMessageType(),
-                    command.getMessageCode(),
-                    command.getSenderId(),
-                    command.getSimTime(),
-                    command.getRate(),
-                    session.getState(),
-                    exception.getMessage(),
-                    exception);
+            logTimeControlWriteFailed(command, session, exception);
         }
     }
 
@@ -276,13 +247,64 @@ public class SimulationControlService implements SimulationControlCommandPort {
                                 ProtocolData protocolData,
                                 String sessionState) {
         loggerMetrics.recordStateViolation();
+
+        logStateResult(result, instanceId, protocolData, sessionState);
+    }
+
+    /**
+     * 输出控制命令成功日志。
+     *
+     * @param result 处理结果。
+     * @param instanceId 实例 ID。
+     * @param protocolData 协议数据。
+     * @param session 会话对象。
+     */
+    private void logControlResult(String result,
+                                  String instanceId,
+                                  ProtocolData protocolData,
+                                  SimulationSession session) {
+        log.info("result={} instanceId={} topic=- messageType={} messageCode={} senderId={} simtime={} sessionState={}",
+                result, instanceId, protocolData.getMessageType(), protocolData.getMessageCode(), protocolData.getSenderId(), session.getSimulationClock().currentSimTimeMillis(), session.getState());
+    }
+
+    /**
+     * 输出控制时间点写入成功日志。
+     *
+     * @param command 控制时间点写入命令。
+     */
+    private void logTimeControlWriteSuccess(TimeControlRecordCommand command) {
+        log.debug("result=time_control_write_success instanceId={} topic=- messageType={} messageCode={} senderId={} simtime={} rate={}",
+                command.getInstanceId(), command.getMessageType(), command.getMessageCode(), command.getSenderId(), command.getSimTime(), command.getRate());
+    }
+
+    /**
+     * 输出控制时间点写入失败日志。
+     *
+     * @param command 控制时间点写入命令。
+     * @param session 会话对象。
+     * @param exception 写入异常。
+     */
+    private void logTimeControlWriteFailed(TimeControlRecordCommand command,
+                                           SimulationSession session,
+                                           RuntimeException exception) {
+        log.error("result=time_control_write_failed instanceId={} topic=- messageType={} messageCode={} senderId={} simtime={} rate={} sessionState={} reason={}",
+                command.getInstanceId(), command.getMessageType(), command.getMessageCode(), command.getSenderId(), command.getSimTime(), command.getRate(), session.getState(), exception.getMessage(), exception);
+    }
+
+    /**
+     * 输出状态忽略日志。
+     *
+     * @param result 处理结果。
+     * @param instanceId 实例 ID。
+     * @param protocolData 协议数据。
+     * @param sessionState 会话状态。
+     */
+    private void logStateResult(String result,
+                                String instanceId,
+                                ProtocolData protocolData,
+                                String sessionState) {
         log.info("result={} instanceId={} topic=- messageType={} messageCode={} senderId={} simtime=-1 sessionState={}",
-                result,
-                instanceId,
-                protocolData.getMessageType(),
-                protocolData.getMessageCode(),
-                protocolData.getSenderId(),
-                sessionState);
+                result, instanceId, protocolData.getMessageType(), protocolData.getMessageCode(), protocolData.getSenderId(), sessionState);
     }
 
     /**

@@ -69,11 +69,8 @@ public class SituationRecordService implements SituationRecordIngressPort {
         Optional<SimulationSession> sessionOptional = sessionManager.getSession(instanceId);
         if (!sessionOptional.isPresent()) {
             loggerMetrics.recordStateViolation();
-            log.info("result=ignored_missing_session instanceId={} topic=- messageType={} messageCode={} senderId={} simtime=-1 sessionState=MISSING",
-                    instanceId,
-                    protocolData.getMessageType(),
-                    protocolData.getMessageCode(),
-                    protocolData.getSenderId());
+
+            logRecordResult("ignored_missing_session", instanceId, protocolData, -1L, "MISSING");
             return;
         }
 
@@ -84,13 +81,8 @@ public class SituationRecordService implements SituationRecordIngressPort {
             session.markMessageDropped();
             loggerMetrics.recordMessageDropped();
             loggerMetrics.recordStateViolation();
-            log.info("result=drop_not_running instanceId={} topic=- messageType={} messageCode={} senderId={} simtime={} sessionState={}",
-                    instanceId,
-                    protocolData.getMessageType(),
-                    protocolData.getMessageCode(),
-                    protocolData.getSenderId(),
-                    currentSimTimeOrDefault(session),
-                    session.getState());
+
+            logRecordResult("drop_not_running", instanceId, protocolData, currentSimTimeOrDefault(session), session.getState().name());
             return;
         }
 
@@ -99,25 +91,13 @@ public class SituationRecordService implements SituationRecordIngressPort {
             writeService.write(command);
             session.markRecordWritten();
             loggerMetrics.recordMessageWritten();
-            log.info("result=write_success instanceId={} topic=- messageType={} messageCode={} senderId={} simtime={} sessionState={}",
-                    instanceId,
-                    protocolData.getMessageType(),
-                    protocolData.getMessageCode(),
-                    protocolData.getSenderId(),
-                    command.getSimTime(),
-                    session.getState());
+
+            logRecordResult("write_success", instanceId, protocolData, command.getSimTime(), session.getState().name());
         } catch (RuntimeException exception) {
             session.recordFailure(exception.getMessage());
             loggerMetrics.recordTdengineWriteFailure();
-            log.error("result=write_failed instanceId={} topic=- messageType={} messageCode={} senderId={} simtime={} sessionState={} reason={}",
-                    instanceId,
-                    protocolData.getMessageType(),
-                    protocolData.getMessageCode(),
-                    protocolData.getSenderId(),
-                    currentSimTimeOrDefault(session),
-                    session.getState(),
-                    exception.getMessage(),
-                    exception);
+
+            logRecordFailed(instanceId, protocolData, session, exception);
             throw wrapWriteException(exception);
         }
     }
@@ -166,5 +146,39 @@ public class SituationRecordService implements SituationRecordIngressPort {
             return exception;
         }
         return BusinessException.tdengineWrite("TDengine 写入失败", exception);
+    }
+
+    /**
+     * 输出态势记录处理结果日志。
+     *
+     * @param result 处理结果。
+     * @param instanceId 实例 ID。
+     * @param protocolData 协议数据。
+     * @param simTime 仿真时间。
+     * @param sessionState 会话状态。
+     */
+    private void logRecordResult(String result,
+                                 String instanceId,
+                                 ProtocolData protocolData,
+                                 long simTime,
+                                 String sessionState) {
+        log.info("result={} instanceId={} topic=- messageType={} messageCode={} senderId={} simtime={} sessionState={}",
+                result, instanceId, protocolData.getMessageType(), protocolData.getMessageCode(), protocolData.getSenderId(), simTime, sessionState);
+    }
+
+    /**
+     * 输出态势记录写入失败日志。
+     *
+     * @param instanceId 实例 ID。
+     * @param protocolData 协议数据。
+     * @param session 会话对象。
+     * @param exception 写入异常。
+     */
+    private void logRecordFailed(String instanceId,
+                                 ProtocolData protocolData,
+                                 SimulationSession session,
+                                 RuntimeException exception) {
+        log.error("result=write_failed instanceId={} topic=- messageType={} messageCode={} senderId={} simtime={} sessionState={} reason={}",
+                instanceId, protocolData.getMessageType(), protocolData.getMessageCode(), protocolData.getSenderId(), currentSimTimeOrDefault(session), session.getState(), exception.getMessage(), exception);
     }
 }

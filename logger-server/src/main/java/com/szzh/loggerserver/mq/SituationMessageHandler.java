@@ -85,19 +85,12 @@ public class SituationMessageHandler {
             protocolData = ProtocolMessageUtil.parseData(messageExt.getBody());
         } catch (ProtocolParseException exception) {
             loggerMetrics.recordProtocolParseFailure();
-            log.warn("result=protocol_parse_failed instanceId={} topic={} messageType=-1 messageCode=-1 senderId=-1 simtime=-1 reason={}",
-                    instanceId,
-                    messageExt.getTopic(),
-                    exception.getMessage());
+
+            logProtocolParseFailed(instanceId, messageExt, exception);
             return;
         }
         if (situationRecordIngressPort == null) {
-            log.debug("result=port_missing instanceId={} topic={} messageType={} messageCode={} senderId={} simtime=-1",
-                    instanceId,
-                    messageExt.getTopic(),
-                    protocolData.getMessageType(),
-                    protocolData.getMessageCode(),
-                    protocolData.getSenderId());
+            logPortMissing(instanceId, messageExt, protocolData);
             return;
         }
         try {
@@ -105,15 +98,50 @@ public class SituationMessageHandler {
         } catch (BusinessException exception) {
             logByBusinessException(instanceId, messageExt, protocolData, exception);
         } catch (RuntimeException exception) {
-            log.error("result=unexpected_exception instanceId={} topic={} messageType={} messageCode={} senderId={} simtime=-1 reason={}",
-                    instanceId,
-                    messageExt.getTopic(),
-                    protocolData.getMessageType(),
-                    protocolData.getMessageCode(),
-                    protocolData.getSenderId(),
-                    exception.getMessage(),
-                    exception);
+            logUnexpectedException(instanceId, messageExt, protocolData, exception);
         }
+    }
+
+    /**
+     * 输出协议解析失败日志。
+     *
+     * @param instanceId 实例 ID。
+     * @param messageExt RocketMQ 原始消息。
+     * @param exception 协议解析异常。
+     */
+    private void logProtocolParseFailed(String instanceId,
+                                        MessageExt messageExt,
+                                        ProtocolParseException exception) {
+        log.warn("result=protocol_parse_failed instanceId={} topic={} messageType=-1 messageCode=-1 senderId=-1 simtime=-1 reason={}",
+                instanceId, messageExt.getTopic(), exception.getMessage());
+    }
+
+    /**
+     * 输出态势入口端口缺失日志。
+     *
+     * @param instanceId 实例 ID。
+     * @param messageExt RocketMQ 原始消息。
+     * @param protocolData 协议数据。
+     */
+    private void logPortMissing(String instanceId, MessageExt messageExt, ProtocolData protocolData) {
+        log.debug("result=port_missing instanceId={} topic={} messageType={} messageCode={} senderId={} simtime=-1",
+                instanceId, messageExt.getTopic(), protocolData.getMessageType(), protocolData.getMessageCode(), protocolData.getSenderId());
+    }
+
+    /**
+     * 输出未预期异常日志。
+     *
+     * @param instanceId 实例 ID。
+     * @param messageExt RocketMQ 原始消息。
+     * @param protocolData 协议数据。
+     * @param exception 运行时异常。
+     */
+    private void logUnexpectedException(String instanceId,
+                                        MessageExt messageExt,
+                                        ProtocolData protocolData,
+                                        RuntimeException exception) {
+        log.error("result=unexpected_exception instanceId={} topic={} messageType={} messageCode={} senderId={} simtime=-1 reason={}",
+                instanceId, messageExt.getTopic(), protocolData.getMessageType(), protocolData.getMessageCode(), protocolData.getSenderId(), exception.getMessage(), exception);
     }
 
     /**
@@ -130,23 +158,10 @@ public class SituationMessageHandler {
                                         BusinessException exception) {
         if (exception.getCategory() == BusinessException.Category.TDENGINE_WRITE) {
             log.error("result=business_exception category={} instanceId={} topic={} messageType={} messageCode={} senderId={} simtime=-1 reason={}",
-                    exception.getCategory(),
-                    instanceId,
-                    messageExt.getTopic(),
-                    protocolData.getMessageType(),
-                    protocolData.getMessageCode(),
-                    protocolData.getSenderId(),
-                    exception.getMessage(),
-                    exception);
+                    exception.getCategory(), instanceId, messageExt.getTopic(), protocolData.getMessageType(), protocolData.getMessageCode(), protocolData.getSenderId(), exception.getMessage(), exception);
             return;
         }
         log.warn("result=business_exception category={} instanceId={} topic={} messageType={} messageCode={} senderId={} simtime=-1 reason={}",
-                exception.getCategory(),
-                instanceId,
-                messageExt.getTopic(),
-                protocolData.getMessageType(),
-                protocolData.getMessageCode(),
-                protocolData.getSenderId(),
-                exception.getMessage());
+                exception.getCategory(), instanceId, messageExt.getTopic(), protocolData.getMessageType(), protocolData.getMessageCode(), protocolData.getSenderId(), exception.getMessage());
     }
 }

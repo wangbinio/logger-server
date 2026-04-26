@@ -96,22 +96,15 @@ public class InstanceBroadcastMessageHandler {
             protocolData = parse(messageExt);
         } catch (ProtocolParseException exception) {
             loggerMetrics.recordProtocolParseFailure();
-            log.warn("result=protocol_parse_failed instanceId={} topic={} messageType=-1 messageCode=-1 senderId=-1 simtime=-1 reason={}",
-                    instanceId,
-                    messageExt.getTopic(),
-                    exception.getMessage());
+
+            logProtocolParseFailed(instanceId, messageExt, exception);
             return;
         }
         if (!messageConstants.isInstanceControlMessage(protocolData.getMessageType())) {
             return;
         }
         if (simulationControlCommandPort == null) {
-            log.debug("result=port_missing instanceId={} topic={} messageType={} messageCode={} senderId={} simtime=-1",
-                    instanceId,
-                    messageExt.getTopic(),
-                    protocolData.getMessageType(),
-                    protocolData.getMessageCode(),
-                    protocolData.getSenderId());
+            logPortMissing(instanceId, messageExt, protocolData);
             return;
         }
         try {
@@ -128,23 +121,12 @@ public class InstanceBroadcastMessageHandler {
                 return;
             }
             loggerMetrics.recordStateViolation();
-            log.debug("result=ignored_unknown_message instanceId={} topic={} messageType={} messageCode={} senderId={} simtime=-1",
-                    instanceId,
-                    messageExt.getTopic(),
-                    protocolData.getMessageType(),
-                    protocolData.getMessageCode(),
-                    protocolData.getSenderId());
+
+            logIgnoredUnknownMessage(instanceId, messageExt, protocolData);
         } catch (BusinessException exception) {
             logByBusinessException(instanceId, messageExt, protocolData, exception);
         } catch (RuntimeException exception) {
-            log.error("result=unexpected_exception instanceId={} topic={} messageType={} messageCode={} senderId={} simtime=-1 reason={}",
-                    instanceId,
-                    messageExt.getTopic(),
-                    protocolData.getMessageType(),
-                    protocolData.getMessageCode(),
-                    protocolData.getSenderId(),
-                    exception.getMessage(),
-                    exception);
+            logUnexpectedException(instanceId, messageExt, protocolData, exception);
         }
     }
 
@@ -157,6 +139,60 @@ public class InstanceBroadcastMessageHandler {
     private ProtocolData parse(MessageExt messageExt) {
         Objects.requireNonNull(messageExt, "messageExt 不能为空");
         return ProtocolMessageUtil.parseData(messageExt.getBody());
+    }
+
+    /**
+     * 输出协议解析失败日志。
+     *
+     * @param instanceId 实例 ID。
+     * @param messageExt RocketMQ 原始消息。
+     * @param exception 协议解析异常。
+     */
+    private void logProtocolParseFailed(String instanceId,
+                                        MessageExt messageExt,
+                                        ProtocolParseException exception) {
+        log.warn("result=protocol_parse_failed instanceId={} topic={} messageType=-1 messageCode=-1 senderId=-1 simtime=-1 reason={}",
+                instanceId, messageExt.getTopic(), exception.getMessage());
+    }
+
+    /**
+     * 输出控制端口缺失日志。
+     *
+     * @param instanceId 实例 ID。
+     * @param messageExt RocketMQ 原始消息。
+     * @param protocolData 协议数据。
+     */
+    private void logPortMissing(String instanceId, MessageExt messageExt, ProtocolData protocolData) {
+        log.debug("result=port_missing instanceId={} topic={} messageType={} messageCode={} senderId={} simtime=-1",
+                instanceId, messageExt.getTopic(), protocolData.getMessageType(), protocolData.getMessageCode(), protocolData.getSenderId());
+    }
+
+    /**
+     * 输出未知实例控制消息日志。
+     *
+     * @param instanceId 实例 ID。
+     * @param messageExt RocketMQ 原始消息。
+     * @param protocolData 协议数据。
+     */
+    private void logIgnoredUnknownMessage(String instanceId, MessageExt messageExt, ProtocolData protocolData) {
+        log.debug("result=ignored_unknown_message instanceId={} topic={} messageType={} messageCode={} senderId={} simtime=-1",
+                instanceId, messageExt.getTopic(), protocolData.getMessageType(), protocolData.getMessageCode(), protocolData.getSenderId());
+    }
+
+    /**
+     * 输出未预期异常日志。
+     *
+     * @param instanceId 实例 ID。
+     * @param messageExt RocketMQ 原始消息。
+     * @param protocolData 协议数据。
+     * @param exception 运行时异常。
+     */
+    private void logUnexpectedException(String instanceId,
+                                        MessageExt messageExt,
+                                        ProtocolData protocolData,
+                                        RuntimeException exception) {
+        log.error("result=unexpected_exception instanceId={} topic={} messageType={} messageCode={} senderId={} simtime=-1 reason={}",
+                instanceId, messageExt.getTopic(), protocolData.getMessageType(), protocolData.getMessageCode(), protocolData.getSenderId(), exception.getMessage(), exception);
     }
 
     /**
@@ -173,23 +209,10 @@ public class InstanceBroadcastMessageHandler {
                                         BusinessException exception) {
         if (exception.getCategory() == BusinessException.Category.TDENGINE_WRITE) {
             log.error("result=business_exception category={} instanceId={} topic={} messageType={} messageCode={} senderId={} simtime=-1 reason={}",
-                    exception.getCategory(),
-                    instanceId,
-                    messageExt.getTopic(),
-                    protocolData.getMessageType(),
-                    protocolData.getMessageCode(),
-                    protocolData.getSenderId(),
-                    exception.getMessage(),
-                    exception);
+                    exception.getCategory(), instanceId, messageExt.getTopic(), protocolData.getMessageType(), protocolData.getMessageCode(), protocolData.getSenderId(), exception.getMessage(), exception);
             return;
         }
         log.warn("result=business_exception category={} instanceId={} topic={} messageType={} messageCode={} senderId={} simtime=-1 reason={}",
-                exception.getCategory(),
-                instanceId,
-                messageExt.getTopic(),
-                protocolData.getMessageType(),
-                protocolData.getMessageCode(),
-                protocolData.getSenderId(),
-                exception.getMessage());
+                exception.getCategory(), instanceId, messageExt.getTopic(), protocolData.getMessageType(), protocolData.getMessageCode(), protocolData.getSenderId(), exception.getMessage());
     }
 }
