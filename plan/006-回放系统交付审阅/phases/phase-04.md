@@ -1,5 +1,7 @@
 # Phase 04 测试证据与日志回归补强
 
+当前状态：已完成
+
 ## 1. 阶段目标
 
 补齐交付审阅中暴露的验证证据不足：
@@ -48,3 +50,24 @@
 ## 6. 当前无需澄清的问题
 
 本阶段可以按测试补强方向直接执行，暂无阻塞性疑问。
+
+## 7. Review
+
+### 7.1 实际改动
+
+- 新增 `ReplaySpringFlowIntegrationTest`，使用 `@SpringBootTest` 加载 `ReplayServerApplication`，通过 `@MockBean` 替代 TDengine、RocketMQ 发送和动态订阅外部端口，通过真实 Spring Bean 装配全局监听器、实例消息处理器、会话管理、生命周期、控制、跳转、调度、指标和态势发布链路。
+- 新增 create/start/pause/resume/rate/jump/stop 容器级 Mock 全链路验证，断言元信息发布、会话状态迁移、跳转水位、指标计数和订阅清理。
+- 使用 `OutputCaptureExtension` 自动断言成功路径结构化日志，覆盖 `replay_create_success`、`replay_stop_success`、`replay_start_success`、`replay_pause_success`、`replay_resume_success`、`replay_rate_success`、`replay_jump_success` 及 `instanceId/topic/messageType/messageCode/senderId/currentReplayTime/lastDispatchedSimTime/rate/replayState` 等关键字段。
+- 补齐失败路径结构化日志断言，覆盖协议解析失败、create failed、全局监听业务异常、态势发布重试失败和调度 tick 查询失败。
+
+### 7.2 验证结果
+
+- `mvn -pl replay-server -am "-Dtest=ReplaySpringFlowIntegrationTest" -DfailIfNoTests=false test`：通过，`Tests run: 3, Failures: 0, Errors: 0, Skipped: 0`。
+- `mvn -pl replay-server -am test`：通过，`Tests run: 112, Failures: 0, Errors: 0, Skipped: 1`；跳过项为默认关闭的真实环境测试。
+- `mvn -pl replay-server -am clean test`：通过，`Tests run: 112, Failures: 0, Errors: 0, Skipped: 1`；跳过项为默认关闭的真实环境测试。
+- `mvn clean test`：通过，根反应堆 `common`、`logger-server`、`replay-server` 均为 `BUILD SUCCESS`；测试报告统计为 `common 12/0/0/0`、`logger-server 59/0/0/2`、`replay-server 112/0/0/1`。
+- surefire dump 检查：`common/target/surefire-reports`、`logger-server/target/surefire-reports`、`replay-server/target/surefire-reports` 中未发现 `.dump` 或 `.dumpstream`。
+
+### 7.3 遗留风险
+
+- 真实环境测试仍保持显式开关控制，本阶段默认回归只证明 Spring 容器 Mock 链路和日志回归，不替代 Phase 03 的真实 TDengine/RocketMQ 开启验证。
