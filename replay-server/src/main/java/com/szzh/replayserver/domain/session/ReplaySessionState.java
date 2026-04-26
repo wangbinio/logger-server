@@ -20,11 +20,11 @@ public enum ReplaySessionState {
     FAILED;
 
     /**
-     * 判断当前状态是否为终态。
+     * 判断当前状态是否为释放终态。
      *
      * @return 是否为终态。
      */
     public boolean isTerminal() {
-        return this == STOPPED || this == COMPLETED || this == FAILED;
+        return this == STOPPED || this == FAILED;
     }
 }

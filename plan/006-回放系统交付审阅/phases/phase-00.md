@@ -1,5 +1,7 @@
 # Phase 00 回放水位与终态语义修复
 
+当前状态：已完成
+
 ## 1. 阶段目标
 
 修复交付审阅中与回放状态机和水位边界直接相关的问题：
@@ -52,3 +54,26 @@
 ## 6. 当前无需澄清的问题
 
 本阶段可以按设计直接执行，暂无阻塞性疑问。
+
+## 7. Review
+
+### 实际改动
+
+- 将 `ReplaySession` 初始 `lastDispatchedSimTime` 从 `simulationStartTime` 调整为 `simulationStartTime - 1`，并对 `Long.MIN_VALUE` 起始时间做下溢保护。
+- 将 `ReplaySessionState.COMPLETED` 从释放终态中拆出；`STOPPED` 和 `FAILED` 仍作为释放终态。
+- 允许 `COMPLETED` 会话执行时间跳转，跳转成功后进入 `PAUSED`，便于用户从目标时间继续查看或恢复回放。
+- 调整 `ReplaySession.stop()` 与 `ReplaySessionManager.stopSession()`，确保 `COMPLETED` 和 `FAILED` 会话收到 stop 后转为 `STOPPED` 并可被移除。
+- 补充并更新 `ReplaySessionTest`、`ReplaySessionManagerTest`、`ReplaySchedulerTest`、`ReplayControlServiceTest`、`ReplayLifecycleServiceTest`、`ReplaySessionStateTest`、`ReplayMetricsTest` 和 `ReplayFlowIntegrationTest`，覆盖初始水位、首帧发布、完成态跳转、终态停止释放和指标语义。
+
+### 测试结果
+
+- TDD 红灯：`mvn -pl replay-server -am "-Dtest=ReplaySessionTest,ReplaySessionManagerTest,ReplaySchedulerTest,ReplayControlServiceTest,ReplayLifecycleServiceTest" -DfailIfNoTests=false test` 在实现前失败，暴露初始水位、完成态跳转和终态停止释放偏差。
+- Phase 00 定向测试：同一命令在实现后通过，32 个测试成功。
+- 跳转服务补充回归：`mvn -pl replay-server -am "-Dtest=ReplayJumpServiceTest" -DfailIfNoTests=false test` 通过，5 个测试成功。
+- 模块回归：`mvn -pl replay-server -am test` 通过，101 个测试执行，1 个真实环境测试按默认策略跳过。
+- 全工程干净回归：`mvn clean test` 通过；清理历史报告后 surefire XML 汇总为 `Tests=172, Failures=0, Errors=0, Skipped=2`。
+
+### 遗留风险
+
+- Phase 00 只修复水位和终态语义；连续调度与跳转发布互斥、跳转发布失败进入 `FAILED` 等并发/失败语义仍按 Phase 01 处理。
+- 真实环境回放验证仍保持显式开关策略，本阶段未开启真实 TDengine/RocketMQ 测试。

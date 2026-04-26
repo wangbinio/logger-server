@@ -209,10 +209,10 @@ class ReplayFlowIntegrationTest {
          */
         private void stubContinuousWindow() {
             Mockito.when(frameRepository.findWindowFrames(Mockito.eq(eventTable.withType(ReplayTableType.EVENT)),
-                            Mockito.eq(1_000L), Mockito.eq(1_250L), Mockito.any(ReplayCursor.class)))
+                            Mockito.eq(999L), Mockito.eq(1_250L), Mockito.any(ReplayCursor.class)))
                     .thenReturn(Collections.singletonList(frame(eventTable, 1_100L)));
             Mockito.when(frameRepository.findWindowFrames(Mockito.eq(periodicTable),
-                            Mockito.eq(1_000L), Mockito.eq(1_250L), Mockito.any(ReplayCursor.class)))
+                            Mockito.eq(999L), Mockito.eq(1_250L), Mockito.any(ReplayCursor.class)))
                     .thenReturn(Collections.singletonList(frame(periodicTable, 1_200L)));
         }
 

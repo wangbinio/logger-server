@@ -96,6 +96,43 @@ class ReplayLifecycleServiceTest {
     }
 
     /**
+     * 验证停止自然完成会话会释放调度、订阅和会话对象。
+     */
+    @Test
+    void shouldStopCompletedReplayAndReleaseResources() {
+        Fixture fixture = new Fixture();
+        fixture.stubCreateSuccess();
+        fixture.service.handleCreate(protocolData("{\"instanceId\":\"instance-001\"}"));
+        ReplaySession session = fixture.sessionManager.requireSession("instance-001");
+        session.start();
+        session.markCompleted();
+
+        fixture.service.handleStop(protocolData("{\"instanceId\":\"instance-001\"}"));
+
+        Mockito.verify(fixture.scheduler).cancel("instance-001");
+        Mockito.verify(fixture.subscriptionManager).unsubscribe("instance-001");
+        Assertions.assertFalse(fixture.sessionManager.getSession("instance-001").isPresent());
+    }
+
+    /**
+     * 验证停止失败会话会释放调度、订阅和会话对象。
+     */
+    @Test
+    void shouldStopFailedReplayAndReleaseResources() {
+        Fixture fixture = new Fixture();
+        fixture.stubCreateSuccess();
+        fixture.service.handleCreate(protocolData("{\"instanceId\":\"instance-001\"}"));
+        ReplaySession session = fixture.sessionManager.requireSession("instance-001");
+        session.markFailed("boom");
+
+        fixture.service.handleStop(protocolData("{\"instanceId\":\"instance-001\"}"));
+
+        Mockito.verify(fixture.scheduler).cancel("instance-001");
+        Mockito.verify(fixture.subscriptionManager).unsubscribe("instance-001");
+        Assertions.assertFalse(fixture.sessionManager.getSession("instance-001").isPresent());
+    }
+
+    /**
      * 构建协议数据。
      *
      * @param json JSON 载荷。

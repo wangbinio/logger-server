@@ -71,6 +71,40 @@ class ReplaySessionManagerTest {
     }
 
     /**
+     * 验证自然完成会话收到停止后仍会被移除。
+     */
+    @Test
+    void shouldStopAndRemoveCompletedSession() {
+        ReplaySessionManager sessionManager = new ReplaySessionManager(new AtomicLong(1_000L)::get);
+        ReplaySession session = sessionManager.createSession(
+                "instance-001", new ReplayTimeRange(1_000L, 2_000L), eventTables(), periodicTables());
+        session.markReady();
+        session.start();
+        session.markCompleted();
+
+        Assertions.assertTrue(sessionManager.stopSession("instance-001"));
+        Assertions.assertEquals(ReplaySessionState.STOPPED, session.getState());
+        Assertions.assertTrue(sessionManager.removeSession("instance-001").isPresent());
+        Assertions.assertFalse(sessionManager.getSession("instance-001").isPresent());
+    }
+
+    /**
+     * 验证失败会话收到停止后仍会被移除。
+     */
+    @Test
+    void shouldStopAndRemoveFailedSession() {
+        ReplaySessionManager sessionManager = new ReplaySessionManager(new AtomicLong(1_000L)::get);
+        ReplaySession session = sessionManager.createSession(
+                "instance-001", new ReplayTimeRange(1_000L, 2_000L), eventTables(), periodicTables());
+        session.markFailed("boom");
+
+        Assertions.assertTrue(sessionManager.stopSession("instance-001"));
+        Assertions.assertEquals(ReplaySessionState.STOPPED, session.getState());
+        Assertions.assertTrue(sessionManager.removeSession("instance-001").isPresent());
+        Assertions.assertFalse(sessionManager.getSession("instance-001").isPresent());
+    }
+
+    /**
      * 创建事件表测试数据。
      *
      * @return 事件表列表。

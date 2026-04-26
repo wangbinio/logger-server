@@ -45,10 +45,10 @@ class ReplaySchedulerTest {
         ReplayFrame periodicFrame = frame(periodicTable, 1_300L);
         ReplayFrameRepository repository = Mockito.mock(ReplayFrameRepository.class);
         ReplaySituationPublisher publisher = Mockito.mock(ReplaySituationPublisher.class);
-        Mockito.when(repository.findWindowFrames(Mockito.eq(eventTable), Mockito.eq(1_000L), Mockito.eq(1_500L),
+        Mockito.when(repository.findWindowFrames(Mockito.eq(eventTable), Mockito.eq(999L), Mockito.eq(1_500L),
                         Mockito.any(ReplayCursor.class)))
                 .thenReturn(Collections.singletonList(eventFrame));
-        Mockito.when(repository.findWindowFrames(Mockito.eq(periodicTable), Mockito.eq(1_000L), Mockito.eq(1_500L),
+        Mockito.when(repository.findWindowFrames(Mockito.eq(periodicTable), Mockito.eq(999L), Mockito.eq(1_500L),
                         Mockito.any(ReplayCursor.class)))
                 .thenReturn(Collections.singletonList(periodicFrame));
         ReplayScheduler scheduler = new ReplayScheduler(repository, new ReplayFrameMergeService(), publisher, 10, 50L);
@@ -78,7 +78,7 @@ class ReplaySchedulerTest {
 
         Mockito.verifyNoInteractions(repository);
         Mockito.verifyNoInteractions(publisher);
-        Assertions.assertEquals(1_000L, session.getLastDispatchedSimTime());
+        Assertions.assertEquals(999L, session.getLastDispatchedSimTime());
     }
 
     /**
@@ -92,10 +92,10 @@ class ReplaySchedulerTest {
         ReplayFrame frame = frame(eventTable, 1_200L);
         ReplayFrameRepository repository = Mockito.mock(ReplayFrameRepository.class);
         ReplaySituationPublisher publisher = Mockito.mock(ReplaySituationPublisher.class);
-        Mockito.when(repository.findWindowFrames(Mockito.eq(eventTable), Mockito.eq(1_000L), Mockito.eq(1_500L),
+        Mockito.when(repository.findWindowFrames(Mockito.eq(eventTable), Mockito.eq(999L), Mockito.eq(1_500L),
                         Mockito.any(ReplayCursor.class)))
                 .thenReturn(Collections.singletonList(frame));
-        Mockito.when(repository.findWindowFrames(Mockito.eq(periodicTable), Mockito.eq(1_000L), Mockito.eq(1_500L),
+        Mockito.when(repository.findWindowFrames(Mockito.eq(periodicTable), Mockito.eq(999L), Mockito.eq(1_500L),
                         Mockito.any(ReplayCursor.class)))
                 .thenReturn(Collections.emptyList());
         Mockito.doThrow(BusinessException.state("publish boom"))
@@ -106,7 +106,7 @@ class ReplaySchedulerTest {
         Assertions.assertThrows(BusinessException.class, () -> scheduler.tick(session));
 
         Assertions.assertEquals(ReplaySessionState.FAILED, session.getState());
-        Assertions.assertEquals(1_000L, session.getLastDispatchedSimTime());
+        Assertions.assertEquals(999L, session.getLastDispatchedSimTime());
     }
 
     /**
@@ -120,7 +120,7 @@ class ReplaySchedulerTest {
         ReplayFrameRepository repository = Mockito.mock(ReplayFrameRepository.class);
         ReplaySituationPublisher publisher = Mockito.mock(ReplaySituationPublisher.class);
         ReplayMetrics metrics = new ReplayMetrics();
-        Mockito.when(repository.findWindowFrames(Mockito.eq(eventTable), Mockito.eq(1_000L), Mockito.eq(1_500L),
+        Mockito.when(repository.findWindowFrames(Mockito.eq(eventTable), Mockito.eq(999L), Mockito.eq(1_500L),
                         Mockito.any(ReplayCursor.class)))
                 .thenThrow(new IllegalStateException("tdengine boom"));
         ReplayScheduler scheduler =
@@ -145,7 +145,7 @@ class ReplaySchedulerTest {
         ReplayFrameRepository repository = Mockito.mock(ReplayFrameRepository.class);
         ReplaySituationPublisher publisher = Mockito.mock(ReplaySituationPublisher.class);
         Mockito.when(repository.findWindowFrames(Mockito.any(ReplayTableDescriptor.class),
-                        Mockito.eq(1_000L), Mockito.eq(2_000L), Mockito.any(ReplayCursor.class)))
+                        Mockito.eq(999L), Mockito.eq(2_000L), Mockito.any(ReplayCursor.class)))
                 .thenReturn(Collections.emptyList());
         ReplayScheduler scheduler = new ReplayScheduler(repository, new ReplayFrameMergeService(), publisher, 10, 50L);
 
@@ -155,6 +155,30 @@ class ReplaySchedulerTest {
         Assertions.assertEquals(2_000L, session.getLastDispatchedSimTime());
         Assertions.assertSame(handle, session.getBroadcastConsumerHandle());
         Mockito.verifyNoInteractions(publisher);
+    }
+
+    /**
+     * 验证连续回放首次窗口包含仿真开始时间帧。
+     */
+    @Test
+    void shouldPublishFrameAtSimulationStartTimeOnFirstTick() {
+        AtomicLong wallClock = new AtomicLong(1_000L);
+        ReplaySession session = runningSession(wallClock);
+        ReplayFrame firstFrame = frame(eventTable, 1_000L);
+        ReplayFrameRepository repository = Mockito.mock(ReplayFrameRepository.class);
+        ReplaySituationPublisher publisher = Mockito.mock(ReplaySituationPublisher.class);
+        Mockito.when(repository.findWindowFrames(Mockito.eq(eventTable), Mockito.eq(999L), Mockito.eq(1_000L),
+                        Mockito.any(ReplayCursor.class)))
+                .thenReturn(Collections.singletonList(firstFrame));
+        Mockito.when(repository.findWindowFrames(Mockito.eq(periodicTable), Mockito.eq(999L), Mockito.eq(1_000L),
+                        Mockito.any(ReplayCursor.class)))
+                .thenReturn(Collections.emptyList());
+        ReplayScheduler scheduler = new ReplayScheduler(repository, new ReplayFrameMergeService(), publisher, 10, 50L);
+
+        scheduler.tick(session);
+
+        Mockito.verify(publisher).publish("instance-001", firstFrame);
+        Assertions.assertEquals(1_000L, session.getLastDispatchedSimTime());
     }
 
     /**

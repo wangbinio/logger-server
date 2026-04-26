@@ -104,6 +104,23 @@ class ReplayControlServiceTest {
     }
 
     /**
+     * 验证自然完成态仍接受时间跳转控制命令。
+     */
+    @Test
+    void shouldDelegateJumpWhenSessionCompleted() {
+        Fixture fixture = new Fixture();
+        ReplaySession session = fixture.runningSession();
+        session.markCompleted();
+        Mockito.clearInvocations(fixture.scheduler);
+
+        fixture.service.handleJump("instance-001", protocolData("{\"time\":1500}"));
+
+        Mockito.verify(fixture.jumpService).jump(session, 1_500L);
+        Mockito.verifyNoInteractions(fixture.scheduler);
+        Assertions.assertEquals(0L, fixture.metrics.stateConflictCount());
+    }
+
+    /**
      * 验证非法状态控制会记录状态冲突指标。
      */
     @Test

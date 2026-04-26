@@ -116,7 +116,7 @@ public class ReplaySessionManager {
         AtomicBoolean changed = new AtomicBoolean(false);
         sessions.computeIfPresent(normalizeInstanceId(instanceId), (key, session) -> {
             synchronized (session) {
-                if (session.getState().isTerminal()) {
+                if (session.getState() == ReplaySessionState.STOPPED) {
                     return session;
                 }
                 session.stop();

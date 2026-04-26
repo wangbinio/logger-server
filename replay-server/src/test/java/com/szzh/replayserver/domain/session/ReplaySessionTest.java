@@ -51,13 +51,67 @@ class ReplaySessionTest {
     void shouldAdvanceWatermarkOnlyForward() {
         ReplaySession session = newSession(new AtomicLong(1_000L));
 
-        Assertions.assertEquals(1_000L, session.getLastDispatchedSimTime());
+        Assertions.assertEquals(999L, session.getLastDispatchedSimTime());
 
         session.advanceLastDispatchedSimTime(1_200L);
 
         Assertions.assertEquals(1_200L, session.getLastDispatchedSimTime());
         Assertions.assertThrows(IllegalArgumentException.class, () -> session.advanceLastDispatchedSimTime(1_100L));
         Assertions.assertThrows(IllegalArgumentException.class, () -> session.advanceLastDispatchedSimTime(2_500L));
+    }
+
+    /**
+     * 验证初始水位位于仿真开始时间前一毫秒，确保首帧不会被左开窗口漏掉。
+     */
+    @Test
+    void shouldInitializeWatermarkBeforeSimulationStartTime() {
+        ReplaySession session = newSession(new AtomicLong(1_000L));
+
+        Assertions.assertEquals(999L, session.getLastDispatchedSimTime());
+    }
+
+    /**
+     * 验证极小开始时间不会导致初始水位下溢。
+     */
+    @Test
+    void shouldAvoidWatermarkUnderflowWhenStartTimeIsMinimumLong() {
+        ReplayTimeRange timeRange = new ReplayTimeRange(Long.MIN_VALUE, Long.MIN_VALUE + 100L);
+        ReplayClock replayClock = new ReplayClock(timeRange.getStartTime(), timeRange.getEndTime(), () -> 0L);
+        ReplaySession session = new ReplaySession(
+                "instance-min",
+                timeRange,
+                Collections.emptyList(),
+                Collections.emptyList(),
+                replayClock);
+
+        Assertions.assertEquals(Long.MIN_VALUE, session.getLastDispatchedSimTime());
+    }
+
+    /**
+     * 验证自然完成态允许时间跳转，并在跳转后进入可继续查看的暂停态。
+     */
+    @Test
+    void shouldAllowJumpAfterCompletedAndMoveToPaused() {
+        ReplaySession session = newSession(new AtomicLong(1_000L));
+        session.markReady();
+        session.start();
+        session.markCompleted();
+
+        long actualTime = session.jumpTo(1_500L);
+
+        Assertions.assertEquals(1_500L, actualTime);
+        Assertions.assertEquals(ReplaySessionState.PAUSED, session.getState());
+        Assertions.assertEquals(1_500L, session.getReplayClock().currentTime());
+    }
+
+    /**
+     * 验证自然完成态不是释放终态，停止和失败才是不可继续操作状态。
+     */
+    @Test
+    void shouldTreatCompletedAsNaturalStateInsteadOfReleaseTerminal() {
+        Assertions.assertFalse(ReplaySessionState.COMPLETED.isTerminal());
+        Assertions.assertTrue(ReplaySessionState.STOPPED.isTerminal());
+        Assertions.assertTrue(ReplaySessionState.FAILED.isTerminal());
     }
 
     /**

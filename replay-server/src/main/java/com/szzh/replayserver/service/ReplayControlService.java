@@ -249,7 +249,8 @@ public class ReplayControlService implements ReplayControlCommandPort {
     private boolean isJumpAccepted(ReplaySessionState state) {
         return state == ReplaySessionState.READY
                 || state == ReplaySessionState.RUNNING
-                || state == ReplaySessionState.PAUSED;
+                || state == ReplaySessionState.PAUSED
+                || state == ReplaySessionState.COMPLETED;
     }
 
     /**

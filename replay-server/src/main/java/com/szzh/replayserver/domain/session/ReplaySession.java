@@ -80,7 +80,7 @@ public class ReplaySession {
         this.simulationStartTime = timeRange.getStartTime();
         this.simulationEndTime = timeRange.getEndTime();
         this.duration = timeRange.getDuration();
-        this.lastDispatchedSimTime = simulationStartTime;
+        this.lastDispatchedSimTime = initialLastDispatchedSimTime(simulationStartTime);
         this.createdAtMillis = System.currentTimeMillis();
     }
 
@@ -168,10 +168,15 @@ public class ReplaySession {
         ensureNotTerminal();
         if (state != ReplaySessionState.READY
                 && state != ReplaySessionState.RUNNING
-                && state != ReplaySessionState.PAUSED) {
+                && state != ReplaySessionState.PAUSED
+                && state != ReplaySessionState.COMPLETED) {
             throw new IllegalStateException("当前状态不允许时间跳转");
         }
-        return replayClock.jumpTo(targetTime);
+        long actualTime = replayClock.jumpTo(targetTime);
+        if (state == ReplaySessionState.COMPLETED) {
+            this.state = ReplaySessionState.PAUSED;
+        }
+        return actualTime;
     }
 
     /**
@@ -209,9 +214,6 @@ public class ReplaySession {
      */
     public synchronized void stop() {
         if (state == ReplaySessionState.STOPPED) {
-            return;
-        }
-        if (state.isTerminal()) {
             return;
         }
         if (replayClock.isRunning()) {
@@ -306,6 +308,19 @@ public class ReplaySession {
         if (state.isTerminal()) {
             throw new IllegalStateException("终态回放会话不允许迁移到其他状态");
         }
+    }
+
+    /**
+     * 计算初始发布水位，避免首次左开窗口漏掉开始时间帧。
+     *
+     * @param simulationStartTime 仿真开始时间。
+     * @return 初始已发布水位。
+     */
+    private long initialLastDispatchedSimTime(long simulationStartTime) {
+        if (simulationStartTime == Long.MIN_VALUE) {
+            return Long.MIN_VALUE;
+        }
+        return simulationStartTime - 1L;
     }
 
     /**

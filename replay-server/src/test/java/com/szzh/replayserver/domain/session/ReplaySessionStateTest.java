@@ -9,7 +9,7 @@ import org.junit.jupiter.api.Test;
 class ReplaySessionStateTest {
 
     /**
-     * 验证终态识别。
+     * 验证释放终态识别。
      */
     @Test
     void shouldIdentifyTerminalStates() {
@@ -17,9 +17,9 @@ class ReplaySessionStateTest {
         Assertions.assertFalse(ReplaySessionState.READY.isTerminal());
         Assertions.assertFalse(ReplaySessionState.RUNNING.isTerminal());
         Assertions.assertFalse(ReplaySessionState.PAUSED.isTerminal());
+        Assertions.assertFalse(ReplaySessionState.COMPLETED.isTerminal());
 
         Assertions.assertTrue(ReplaySessionState.STOPPED.isTerminal());
-        Assertions.assertTrue(ReplaySessionState.COMPLETED.isTerminal());
         Assertions.assertTrue(ReplaySessionState.FAILED.isTerminal());
     }
 }

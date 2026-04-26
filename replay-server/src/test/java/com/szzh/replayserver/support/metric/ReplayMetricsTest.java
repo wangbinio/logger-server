@@ -18,10 +18,10 @@ import java.util.concurrent.atomic.AtomicLong;
 class ReplayMetricsTest {
 
     /**
-     * 验证活跃会话数只统计非终态会话。
+     * 验证活跃会话数统计仍保留控制订阅的自然完成会话。
      */
     @Test
-    void shouldCountOnlyNonTerminalReplaySessions() {
+    void shouldCountCompletedReplaySessionsAsActiveBeforeStop() {
         ReplaySessionManager sessionManager = new ReplaySessionManager(new AtomicLong(1_000L)::get);
         ReplayMetrics metrics = new ReplayMetrics(sessionManager);
         ReplaySession activeSession = session("active-instance");
@@ -30,7 +30,7 @@ class ReplayMetricsTest {
         sessionManager.createSession(activeSession);
         sessionManager.createSession(completedSession);
 
-        Assertions.assertEquals(1L, metrics.activeSessionCount());
+        Assertions.assertEquals(2L, metrics.activeSessionCount());
     }
 
     /**
