@@ -228,12 +228,14 @@ public class ReplayControlService implements ReplayControlCommandPort {
             // 跳转期间暂停连续调度，避免窗口推进和补偿发布并发。
             scheduler.cancel(instanceId);
         }
+        boolean jumpSucceeded = false;
         try {
             jumpService.jump(session, payload.getTime());
+            jumpSucceeded = true;
 
             logControlResult("replay_jump_success", instanceId, protocolData, session);
         } finally {
-            if (wasRunning && session.getState() == ReplaySessionState.RUNNING) {
+            if (jumpSucceeded && wasRunning && session.getState() == ReplaySessionState.RUNNING) {
                 // 跳转完成后恢复原运行态调度。
                 scheduler.schedule(session);
             }

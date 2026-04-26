@@ -104,6 +104,25 @@ class ReplayControlServiceTest {
     }
 
     /**
+     * 验证跳转异常时不会在 finally 中恢复调度。
+     */
+    @Test
+    void shouldNotResumeSchedulerWhenJumpThrows() {
+        Fixture fixture = new Fixture();
+        fixture.runningSession();
+        Mockito.clearInvocations(fixture.scheduler);
+        Mockito.doThrow(new IllegalStateException("jump boom"))
+                .when(fixture.jumpService)
+                .jump(Mockito.any(ReplaySession.class), Mockito.eq(1_500L));
+
+        Assertions.assertThrows(IllegalStateException.class,
+                () -> fixture.service.handleJump("instance-001", protocolData("{\"time\":1500}")));
+
+        Mockito.verify(fixture.scheduler).cancel("instance-001");
+        Mockito.verify(fixture.scheduler, Mockito.never()).schedule(Mockito.any(ReplaySession.class));
+    }
+
+    /**
      * 验证自然完成态仍接受时间跳转控制命令。
      */
     @Test

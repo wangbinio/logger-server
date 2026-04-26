@@ -20,7 +20,11 @@ import org.mockito.Mockito;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * 回放调度器测试。
@@ -182,6 +186,64 @@ class ReplaySchedulerTest {
     }
 
     /**
+     * 验证连续调度查询、发布和水位推进期间会阻塞同一会话的时间跳转。
+     *
+     * @throws Exception 并发等待异常。
+     */
+    @Test
+    void shouldBlockJumpWhileSchedulerTickIsInProgress() throws Exception {
+        AtomicLong wallClock = new AtomicLong(1_000L);
+        ReplaySession session = runningSession(wallClock);
+        wallClock.set(1_200L);
+        CountDownLatch tickQueryStarted = new CountDownLatch(1);
+        CountDownLatch releaseTickQuery = new CountDownLatch(1);
+        AtomicBoolean jumpQueriedBeforeTickReleased = new AtomicBoolean(false);
+        AtomicReference<Throwable> tickError = new AtomicReference<Throwable>();
+        AtomicReference<Throwable> jumpError = new AtomicReference<Throwable>();
+        ReplayFrameRepository repository = Mockito.mock(ReplayFrameRepository.class);
+        ReplaySituationPublisher publisher = Mockito.mock(ReplaySituationPublisher.class);
+        Mockito.when(repository.findWindowFrames(Mockito.eq(eventTable), Mockito.eq(999L), Mockito.eq(1_200L),
+                        Mockito.any(ReplayCursor.class)))
+                .thenAnswer(invocation -> {
+                    tickQueryStarted.countDown();
+                    if (!releaseTickQuery.await(2L, TimeUnit.SECONDS)) {
+                        throw new AssertionError("等待释放 tick 查询超时");
+                    }
+                    return Collections.emptyList();
+                });
+        Mockito.when(repository.findWindowFrames(Mockito.eq(periodicTable), Mockito.eq(999L), Mockito.eq(1_200L),
+                        Mockito.any(ReplayCursor.class)))
+                .thenReturn(Collections.emptyList());
+        Mockito.when(repository.findForwardJumpEventFrames(Mockito.eq(eventTable), Mockito.eq(1_200L),
+                        Mockito.eq(1_500L), Mockito.any(ReplayCursor.class)))
+                .thenAnswer(invocation -> {
+                    if (releaseTickQuery.getCount() > 0L) {
+                        jumpQueriedBeforeTickReleased.set(true);
+                    }
+                    return Collections.emptyList();
+                });
+        Mockito.when(repository.findPeriodicLastFrame(periodicTable, 1_500L))
+                .thenReturn(java.util.Optional.empty());
+        ReplayScheduler scheduler = new ReplayScheduler(repository, new ReplayFrameMergeService(), publisher, 10, 50L);
+        ReplayJumpService jumpService = new ReplayJumpService(repository, new ReplayFrameMergeService(), publisher, 10);
+        Thread tickThread = new Thread(() -> runAndCapture(() -> scheduler.tick(session), tickError), "test-replay-tick");
+        Thread jumpThread = new Thread(() -> runAndCapture(() -> jumpService.jump(session, 1_500L), jumpError), "test-replay-jump");
+
+        tickThread.start();
+        Assertions.assertTrue(tickQueryStarted.await(2L, TimeUnit.SECONDS));
+        jumpThread.start();
+        Thread.sleep(200L);
+
+        Assertions.assertFalse(jumpQueriedBeforeTickReleased.get());
+
+        releaseTickQuery.countDown();
+        tickThread.join(2_000L);
+        jumpThread.join(2_000L);
+        assertNoThreadError(tickError);
+        assertNoThreadError(jumpError);
+    }
+
+    /**
      * 创建运行中的测试会话。
      *
      * @param wallClock 墙钟时间。
@@ -216,5 +278,44 @@ class ReplaySchedulerTest {
                 tableDescriptor.getMessageCode(),
                 simTime,
                 new byte[]{1});
+    }
+
+    /**
+     * 执行并发测试动作并捕获异常。
+     *
+     * @param action 测试动作。
+     * @param error 异常引用。
+     */
+    private void runAndCapture(TestAction action, AtomicReference<Throwable> error) {
+        try {
+            action.run();
+        } catch (Throwable throwable) {
+            error.set(throwable);
+        }
+    }
+
+    /**
+     * 断言线程没有抛出异常。
+     *
+     * @param error 异常引用。
+     */
+    private void assertNoThreadError(AtomicReference<Throwable> error) {
+        Throwable throwable = error.get();
+        if (throwable != null) {
+            Assertions.fail(throwable);
+        }
+    }
+
+    /**
+     * 并发测试动作。
+     */
+    private interface TestAction {
+
+        /**
+         * 执行测试动作。
+         *
+         * @throws Exception 执行异常。
+         */
+        void run() throws Exception;
     }
 }

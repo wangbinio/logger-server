@@ -121,9 +121,7 @@ public class ReplayJumpService {
                     replaySession.resume();
                 }
             } catch (RuntimeException exception) {
-                if (wasRunning && replaySession.getState() == ReplaySessionState.PAUSED) {
-                    replaySession.resume();
-                }
+                markFailedIfActive(replaySession, exception);
                 throw exception;
             }
         }
@@ -292,6 +290,18 @@ public class ReplayJumpService {
         } catch (RuntimeException exception) {
             replayMetrics.recordQueryFailure();
             throw exception;
+        }
+    }
+
+    /**
+     * 在会话仍可标记失败时写入失败态。
+     *
+     * @param session 回放会话。
+     * @param exception 原始异常。
+     */
+    private void markFailedIfActive(ReplaySession session, RuntimeException exception) {
+        if (!session.getState().isTerminal()) {
+            session.markFailed(exception.getMessage());
         }
     }
 

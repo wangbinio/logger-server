@@ -153,6 +153,17 @@ public class ReplayScheduler {
      */
     public void tick(ReplaySession session) {
         ReplaySession replaySession = Objects.requireNonNull(session, "session 不能为空");
+        synchronized (replaySession) {
+            doTick(replaySession);
+        }
+    }
+
+    /**
+     * 在会话锁内执行一次连续回放窗口调度。
+     *
+     * @param replaySession 回放会话。
+     */
+    private void doTick(ReplaySession replaySession) {
         if (replaySession.getState() != ReplaySessionState.RUNNING) {
             return;
         }

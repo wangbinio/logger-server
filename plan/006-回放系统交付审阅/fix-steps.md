@@ -11,7 +11,7 @@
 | 阶段 | 名称 | 目标摘要 | 覆盖发现 | 依赖 | 当前状态 | 详细计划 |
 | ---- | ---- | ---- | ---- | ---- | ---- | ---- |
 | Phase 00 | 回放水位与终态语义修复 | 修复初始水位、`COMPLETED` 可跳转、终态停止清理，保证状态机与设计一致 | Finding 1, Finding 5, Finding 6 | 无 | 已完成 | [phase-00.md](E:\project\5y\logger-server\plan\006-回放系统交付审阅\phases\phase-00.md) |
-| Phase 01 | 调度互斥与跳转失败语义修复 | 让连续调度与跳转发布真正互斥，并确保跳转发布失败进入 `FAILED` 且不恢复调度 | Finding 2, Finding 3 | Phase 00 | 未开始 | [phase-01.md](E:\project\5y\logger-server\plan\006-回放系统交付审阅\phases\phase-01.md) |
+| Phase 01 | 调度互斥与跳转失败语义修复 | 让连续调度与跳转发布真正互斥，并确保跳转发布失败进入 `FAILED` 且不恢复调度 | Finding 2, Finding 3 | Phase 00 | 已完成 | [phase-01.md](E:\project\5y\logger-server\plan\006-回放系统交付审阅\phases\phase-01.md) |
 | Phase 02 | 事件表配置与 TDengine 降级修复 | 补齐生产事件表配置，修复 `time_control` 缺表时的态势表降级 | Finding 4, Finding 7 | Phase 00 | 未开始 | [phase-02.md](E:\project\5y\logger-server\plan\006-回放系统交付审阅\phases\phase-02.md) |
 | Phase 03 | 真实环境入口与内容验证补强 | 用真实 `broadcast-global` 入口创建/停止回放，并校验回放内容、顺序和协议字段 | Finding 8, Finding 9 | Phase 01, Phase 02 | 未开始 | [phase-03.md](E:\project\5y\logger-server\plan\006-回放系统交付审阅\phases\phase-03.md) |
 | Phase 04 | 测试证据与日志回归补强 | 补 Spring 容器级 Mock 集成测试、结构化日志断言、干净测试报告策略 | 交付审阅验证缺口 | Phase 01, Phase 02 | 未开始 | [phase-04.md](E:\project\5y\logger-server\plan\006-回放系统交付审阅\phases\phase-04.md) |

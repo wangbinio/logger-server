@@ -1,5 +1,6 @@
 package com.szzh.replayserver.integration;
 
+import com.szzh.common.exception.BusinessException;
 import com.szzh.common.protocol.ProtocolData;
 import com.szzh.common.protocol.ProtocolMessageUtil;
 import com.szzh.common.topic.TopicConstants;
@@ -118,6 +119,32 @@ class ReplayFlowIntegrationTest {
         Assertions.assertEquals(0L, fixture.metrics.activeSessionCount());
         Assertions.assertEquals(6L, fixture.sender.recordsByTopic(
                 TopicConstants.buildInstanceSituationTopic("instance-001")).size());
+    }
+
+    /**
+     * 验证跳转发布失败后会话进入失败态，且控制层不恢复调度。
+     */
+    @Test
+    void shouldMarkFailedAndKeepSchedulerCancelledWhenJumpPublishFails() {
+        fixture = new Fixture();
+        fixture.stubReplayMetadata();
+        fixture.stubContinuousWindow();
+        fixture.stubForwardJump();
+
+        fixture.sendGlobalCreate();
+        ReplaySession session = fixture.sessionManager.requireSession("instance-001");
+        fixture.sendControl(fixture.messageConstants.getInstanceStartMessageCode(), "{}");
+        fixture.wallClock.set(1_250L);
+        fixture.scheduler.tick(session);
+        int scheduleCountBeforeJump = fixture.scheduler.scheduleCount.get();
+
+        fixture.sender.failSituationSend();
+        fixture.sendControl(fixture.messageConstants.getInstanceJumpMessageCode(), "{\"time\":1700}");
+
+        Assertions.assertEquals(ReplaySessionState.FAILED, session.getState());
+        Assertions.assertEquals(1_250L, session.getLastDispatchedSimTime());
+        Assertions.assertEquals(scheduleCountBeforeJump, fixture.scheduler.scheduleCount.get());
+        Assertions.assertEquals(1, fixture.scheduler.cancelCount.get());
     }
 
     /**
@@ -386,6 +413,15 @@ class ReplayFlowIntegrationTest {
 
         private final List<SendRecord> records = new ArrayList<SendRecord>();
 
+        private volatile boolean failSituationSend;
+
+        /**
+         * 设置态势发送失败。
+         */
+        private void failSituationSend() {
+            this.failSituationSend = true;
+        }
+
         /**
          * 记录同步发送消息。
          *
@@ -394,6 +430,9 @@ class ReplayFlowIntegrationTest {
          */
         @Override
         public void send(String topic, byte[] body) {
+            if (failSituationSend && topic.startsWith("situation-")) {
+                throw BusinessException.state("send boom");
+            }
             records.add(new SendRecord(topic, body));
         }
 

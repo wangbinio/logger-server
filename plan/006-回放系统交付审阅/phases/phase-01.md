@@ -1,5 +1,7 @@
 # Phase 01 调度互斥与跳转失败语义修复
 
+当前状态：已完成
+
 ## 1. 阶段目标
 
 修复交付审阅中两个最高风险并发与失败语义问题：
@@ -51,3 +53,23 @@
 ## 6. 当前无需澄清的问题
 
 本阶段修复方向明确，暂无阻塞性疑问。
+
+## Review
+
+### 实际改动
+
+- `ReplayScheduler.tick()` 对同一 `ReplaySession` 加会话级互斥，连续窗口的 TDengine 查询、RocketMQ 发布、水位推进和完成态判断在同一关键区内串行执行，避免与同实例跳转发布交错。
+- `ReplayJumpService.jump()` 复用同一会话锁执行跳转补偿查询、补偿发布、周期快照发布和水位同步；查询或发布抛出运行时异常时，若会话尚未进入终态则标记为 `FAILED`，不再恢复运行态。
+- `ReplayControlService.handleJump()` 增加跳转成功标记，仅在跳转成功、跳转前为运行态且会话仍为 `RUNNING` 时恢复调度，避免失败跳转在 `finally` 中重新 schedule。
+- 新增和补强 `ReplaySchedulerTest`、`ReplayJumpServiceTest`、`ReplayControlServiceTest`、`ReplayFlowIntegrationTest`，覆盖跳转发布失败进入 `FAILED`、水位不推进、控制层不恢复调度，以及连续 tick 与跳转互斥。
+
+### 验证结果
+
+- `mvn -pl replay-server -am "-Dtest=ReplaySchedulerTest,ReplayJumpServiceTest,ReplayControlServiceTest,ReplayFlowIntegrationTest" -DfailIfNoTests=false test`：通过，23 个测试，0 失败，0 错误，0 跳过。
+- `mvn clean test`：通过，Reactor 四个模块均 SUCCESS；clean 后 surefire XML 汇总为 48 个报告文件、176 个测试、0 失败、0 错误、2 跳过。
+- 跳过项为显式开关控制的真实环境测试：`RealEnvironmentFullFlowTest` 和 `ReplayRealEnvironmentTest`，本阶段未开启真实 TDengine/RocketMQ 验证。
+
+### 遗留风险
+
+- 本阶段锁粒度按阶段要求覆盖“查询 -> 发布 -> 水位推进”的原子业务窗口，同一实例跳转会等待正在执行的 tick 完成；如果后续真实环境下单窗口查询或发布耗时过长，需在 Phase 03/04 的真实环境和异步边界验证中继续观察控制命令延迟。
+- 停止命令在调度或跳转发布进行中会等待已有关键区释放后完成资源清理；本阶段已保证跳转与连续发布串行，停止中断语义仍按后续阶段的真实入口验证继续收敛。

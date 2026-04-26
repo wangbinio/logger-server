@@ -122,7 +122,7 @@ class ReplayJumpServiceTest {
     }
 
     /**
-     * 验证跳转发布失败时不推进水位也不移动时钟。
+     * 验证暂停态跳转发布失败时不推进水位、不移动时钟并进入失败态。
      */
     @Test
     void shouldNotAdvanceWatermarkWhenJumpPublishFails() {
@@ -147,7 +147,34 @@ class ReplayJumpServiceTest {
 
         Assertions.assertEquals(1_500L, session.getLastDispatchedSimTime());
         Assertions.assertEquals(1_500L, session.getReplayClock().currentTime());
-        Assertions.assertEquals(ReplaySessionState.PAUSED, session.getState());
+        Assertions.assertEquals(ReplaySessionState.FAILED, session.getState());
+    }
+
+    /**
+     * 验证运行态跳转发布失败时不会恢复为运行态。
+     */
+    @Test
+    void shouldNotResumeRunningSessionWhenJumpPublishFails() {
+        AtomicLong wallClock = new AtomicLong(1_000L);
+        ReplaySession session = runningSession(wallClock);
+        wallClock.set(1_500L);
+        session.advanceLastDispatchedSimTime(1_500L);
+        ReplayFrame eventFrame = frame(eventTable, 1_200L);
+        ReplayFrameRepository repository = Mockito.mock(ReplayFrameRepository.class);
+        ReplaySituationPublisher publisher = Mockito.mock(ReplaySituationPublisher.class);
+        Mockito.when(repository.findBackwardJumpEventFrames(Mockito.eq(eventTable), Mockito.eq(1_000L),
+                        Mockito.eq(1_200L), Mockito.any(ReplayCursor.class)))
+                .thenReturn(Collections.singletonList(eventFrame));
+        Mockito.doThrow(BusinessException.state("publish boom"))
+                .when(publisher)
+                .publish(Mockito.anyString(), Mockito.any(ReplayFrame.class));
+        ReplayJumpService jumpService =
+                new ReplayJumpService(repository, new ReplayFrameMergeService(), publisher, 2);
+
+        Assertions.assertThrows(BusinessException.class, () -> jumpService.jump(session, 1_200L));
+
+        Assertions.assertEquals(1_500L, session.getLastDispatchedSimTime());
+        Assertions.assertEquals(ReplaySessionState.FAILED, session.getState());
     }
 
     /**
@@ -171,6 +198,7 @@ class ReplayJumpServiceTest {
 
         Assertions.assertEquals(1L, metrics.queryFailureCount());
         Assertions.assertEquals(0L, metrics.jumpCount());
+        Assertions.assertEquals(ReplaySessionState.FAILED, session.getState());
     }
 
     /**
