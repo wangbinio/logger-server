@@ -1,15 +1,19 @@
 package com.szzh.loggerserver.service;
 
+import com.szzh.loggerserver.domain.clock.SimulationClock;
 import com.szzh.loggerserver.domain.session.SimulationSession;
 import com.szzh.loggerserver.domain.session.SimulationSessionManager;
 import com.szzh.loggerserver.domain.session.SimulationSessionState;
+import com.szzh.loggerserver.model.dto.TimeControlRecordCommand;
 import com.szzh.loggerserver.mq.TopicSubscriptionManager;
 import com.szzh.loggerserver.util.ProtocolData;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mockito;
 
 import java.nio.charset.StandardCharsets;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * 仿真生命周期服务测试。
@@ -122,6 +126,65 @@ class SimulationLifecycleServiceTest {
     }
 
     /**
+     * 验证全局停止命令会记录仿真结束时间。
+     */
+    @Test
+    void shouldRecordTimeControlWhenStoppingRunningSession() {
+        AtomicLong wallClock = new AtomicLong(1_000L);
+        SimulationSessionManager sessionManager = new SimulationSessionManager(() -> new SimulationClock(wallClock::get));
+        TdengineSchemaService schemaService = Mockito.mock(TdengineSchemaService.class);
+        TopicSubscriptionManager subscriptionManager = Mockito.mock(TopicSubscriptionManager.class);
+        TdengineWriteService writeService = Mockito.mock(TdengineWriteService.class);
+        SimulationLifecycleService lifecycleService =
+                new SimulationLifecycleService(sessionManager, schemaService, subscriptionManager, writeService);
+        SimulationSession session = sessionManager.createSession("instance-001");
+        session.getSimulationClock().start();
+        session.updateState(SimulationSessionState.RUNNING);
+        wallClock.set(1_350L);
+
+        lifecycleService.handleStop(buildProtocol("instance-001", 42, 1001, 7));
+
+        ArgumentCaptor<TimeControlRecordCommand> commandCaptor =
+                ArgumentCaptor.forClass(TimeControlRecordCommand.class);
+        Mockito.verify(writeService).writeTimeControl(commandCaptor.capture());
+        TimeControlRecordCommand command = commandCaptor.getValue();
+        Assertions.assertEquals("instance-001", command.getInstanceId());
+        Assertions.assertEquals(1_350L, command.getSimTime());
+        Assertions.assertEquals(0D, command.getRate());
+        Assertions.assertEquals(42, command.getSenderId());
+        Assertions.assertEquals(1001, command.getMessageType());
+        Assertions.assertEquals(7, command.getMessageCode());
+        Assertions.assertFalse(sessionManager.getSession("instance-001").isPresent());
+        Mockito.verify(subscriptionManager).unsubscribe("instance-001");
+    }
+
+    /**
+     * 验证停止时间记录写入失败不会阻断停止流程。
+     */
+    @Test
+    void shouldKeepStopFlowSuccessfulWhenStopTimeControlWriteFails() {
+        AtomicLong wallClock = new AtomicLong(1_000L);
+        SimulationSessionManager sessionManager = new SimulationSessionManager(() -> new SimulationClock(wallClock::get));
+        TdengineSchemaService schemaService = Mockito.mock(TdengineSchemaService.class);
+        TopicSubscriptionManager subscriptionManager = Mockito.mock(TopicSubscriptionManager.class);
+        TdengineWriteService writeService = Mockito.mock(TdengineWriteService.class);
+        SimulationLifecycleService lifecycleService =
+                new SimulationLifecycleService(sessionManager, schemaService, subscriptionManager, writeService);
+        SimulationSession session = sessionManager.createSession("instance-001");
+        session.getSimulationClock().start();
+        session.updateState(SimulationSessionState.RUNNING);
+        Mockito.doThrow(new IllegalStateException("stop record boom"))
+                .when(writeService)
+                .writeTimeControl(Mockito.any(TimeControlRecordCommand.class));
+
+        lifecycleService.handleStop(buildProtocol("instance-001", 42, 1001, 7));
+
+        Assertions.assertFalse(sessionManager.getSession("instance-001").isPresent());
+        Assertions.assertNull(session.getLastErrorMessage());
+        Mockito.verify(subscriptionManager).unsubscribe("instance-001");
+    }
+
+    /**
      * 验证停止不存在的会话时安全返回。
      */
     @Test
@@ -129,12 +192,14 @@ class SimulationLifecycleServiceTest {
         SimulationSessionManager sessionManager = new SimulationSessionManager();
         TdengineSchemaService schemaService = Mockito.mock(TdengineSchemaService.class);
         TopicSubscriptionManager subscriptionManager = Mockito.mock(TopicSubscriptionManager.class);
+        TdengineWriteService writeService = Mockito.mock(TdengineWriteService.class);
         SimulationLifecycleService lifecycleService =
-                new SimulationLifecycleService(sessionManager, schemaService, subscriptionManager);
+                new SimulationLifecycleService(sessionManager, schemaService, subscriptionManager, writeService);
 
         lifecycleService.handleStop(buildCreateProtocol("missing-instance"));
 
         Mockito.verify(subscriptionManager, Mockito.never()).unsubscribe(Mockito.anyString());
+        Mockito.verify(writeService, Mockito.never()).writeTimeControl(Mockito.any(TimeControlRecordCommand.class));
     }
 
     /**
@@ -144,8 +209,24 @@ class SimulationLifecycleServiceTest {
      * @return 协议对象。
      */
     private ProtocolData buildCreateProtocol(String instanceId) {
+        return buildProtocol(instanceId, 0, 0, 0);
+    }
+
+    /**
+     * 构造协议对象。
+     *
+     * @param instanceId 实例 ID。
+     * @param senderId 发送方 ID。
+     * @param messageType 消息类型。
+     * @param messageCode 消息编号。
+     * @return 协议对象。
+     */
+    private ProtocolData buildProtocol(String instanceId, int senderId, int messageType, int messageCode) {
         ProtocolData protocolData = new ProtocolData();
         protocolData.setRawData(("{\"instanceId\":\"" + instanceId + "\"}").getBytes(StandardCharsets.UTF_8));
+        protocolData.setSenderId(senderId);
+        protocolData.setMessageType(messageType);
+        protocolData.setMessageCode(messageCode);
         return protocolData;
     }
 }

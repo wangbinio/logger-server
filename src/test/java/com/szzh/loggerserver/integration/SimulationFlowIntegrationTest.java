@@ -6,6 +6,7 @@ import com.szzh.loggerserver.domain.session.SimulationSession;
 import com.szzh.loggerserver.domain.session.SimulationSessionManager;
 import com.szzh.loggerserver.domain.session.SimulationSessionState;
 import com.szzh.loggerserver.model.dto.SituationRecordCommand;
+import com.szzh.loggerserver.model.dto.TimeControlRecordCommand;
 import com.szzh.loggerserver.mq.GlobalBroadcastListener;
 import com.szzh.loggerserver.mq.InstanceBroadcastMessageHandler;
 import com.szzh.loggerserver.mq.SituationMessageHandler;
@@ -47,8 +48,8 @@ class SimulationFlowIntegrationTest {
         TopicSubscriptionManager subscriptionManager = Mockito.mock(TopicSubscriptionManager.class);
         TdengineWriteService writeService = Mockito.mock(TdengineWriteService.class);
         SimulationLifecycleService lifecycleService =
-                new SimulationLifecycleService(sessionManager, schemaService, subscriptionManager, metrics);
-        SimulationControlService controlService = new SimulationControlService(sessionManager, metrics);
+                new SimulationLifecycleService(sessionManager, schemaService, subscriptionManager, metrics, writeService);
+        SimulationControlService controlService = new SimulationControlService(sessionManager, metrics, writeService);
         SituationRecordService recordService = new SituationRecordService(sessionManager, writeService, metrics);
         GlobalBroadcastListener globalListener = new GlobalBroadcastListener(messageConstants);
         globalListener.setSimulationLifecycleCommandPort(lifecycleService);
@@ -114,6 +115,14 @@ class SimulationFlowIntegrationTest {
         Assertions.assertFalse(removedSession.isPresent());
         Assertions.assertEquals(0, metrics.getActiveSessionCount());
         Mockito.verify(subscriptionManager).unsubscribe("instance-001");
+        ArgumentCaptor<TimeControlRecordCommand> timeControlCaptor =
+                ArgumentCaptor.forClass(TimeControlRecordCommand.class);
+        Mockito.verify(writeService, Mockito.times(4)).writeTimeControl(timeControlCaptor.capture());
+        TimeControlRecordCommand stopCommand = timeControlCaptor.getAllValues().get(3);
+        Assertions.assertEquals("instance-001", stopCommand.getInstanceId());
+        Assertions.assertEquals(0D, stopCommand.getRate());
+        Assertions.assertEquals(messageConstants.getGlobalMessageType(), stopCommand.getMessageType());
+        Assertions.assertEquals(messageConstants.getGlobalStopMessageCode(), stopCommand.getMessageCode());
     }
 
     /**

@@ -4,6 +4,7 @@ import com.szzh.loggerserver.domain.session.SimulationSession;
 import com.szzh.loggerserver.domain.session.SimulationSessionManager;
 import com.szzh.loggerserver.domain.session.SimulationSessionState;
 import com.szzh.loggerserver.model.dto.TaskCreatePayload;
+import com.szzh.loggerserver.model.dto.TimeControlRecordCommand;
 import com.szzh.loggerserver.mq.SimulationLifecycleCommandPort;
 import com.szzh.loggerserver.mq.TopicSubscriptionManager;
 import com.szzh.loggerserver.support.exception.BusinessException;
@@ -33,6 +34,8 @@ public class SimulationLifecycleService implements SimulationLifecycleCommandPor
 
     private final LoggerMetrics loggerMetrics;
 
+    private final TdengineWriteService tdengineWriteService;
+
     /**
      * 创建仿真生命周期服务。
      *
@@ -43,7 +46,22 @@ public class SimulationLifecycleService implements SimulationLifecycleCommandPor
     public SimulationLifecycleService(SimulationSessionManager sessionManager,
                                       TdengineSchemaService schemaService,
                                       TopicSubscriptionManager subscriptionManager) {
-        this(sessionManager, schemaService, subscriptionManager, new LoggerMetrics());
+        this(sessionManager, schemaService, subscriptionManager, new LoggerMetrics(), null);
+    }
+
+    /**
+     * 创建仿真生命周期服务。
+     *
+     * @param sessionManager 会话管理器。
+     * @param schemaService TDengine 建表服务。
+     * @param subscriptionManager 动态订阅管理器。
+     * @param tdengineWriteService TDengine 写入服务。
+     */
+    public SimulationLifecycleService(SimulationSessionManager sessionManager,
+                                      TdengineSchemaService schemaService,
+                                      TopicSubscriptionManager subscriptionManager,
+                                      TdengineWriteService tdengineWriteService) {
+        this(sessionManager, schemaService, subscriptionManager, new LoggerMetrics(), tdengineWriteService);
     }
 
     /**
@@ -54,15 +72,33 @@ public class SimulationLifecycleService implements SimulationLifecycleCommandPor
      * @param subscriptionManager 动态订阅管理器。
      * @param loggerMetrics 日志指标封装。
      */
-    @Autowired
     public SimulationLifecycleService(SimulationSessionManager sessionManager,
                                       TdengineSchemaService schemaService,
                                       TopicSubscriptionManager subscriptionManager,
                                       LoggerMetrics loggerMetrics) {
+        this(sessionManager, schemaService, subscriptionManager, loggerMetrics, null);
+    }
+
+    /**
+     * 创建仿真生命周期服务。
+     *
+     * @param sessionManager 会话管理器。
+     * @param schemaService TDengine 建表服务。
+     * @param subscriptionManager 动态订阅管理器。
+     * @param loggerMetrics 日志指标封装。
+     * @param tdengineWriteService TDengine 写入服务。
+     */
+    @Autowired
+    public SimulationLifecycleService(SimulationSessionManager sessionManager,
+                                      TdengineSchemaService schemaService,
+                                      TopicSubscriptionManager subscriptionManager,
+                                      LoggerMetrics loggerMetrics,
+                                      TdengineWriteService tdengineWriteService) {
         this.sessionManager = Objects.requireNonNull(sessionManager, "sessionManager 不能为空");
         this.schemaService = Objects.requireNonNull(schemaService, "schemaService 不能为空");
         this.subscriptionManager = Objects.requireNonNull(subscriptionManager, "subscriptionManager 不能为空");
         this.loggerMetrics = Objects.requireNonNull(loggerMetrics, "loggerMetrics 不能为空");
+        this.tdengineWriteService = tdengineWriteService;
     }
 
     /**
@@ -133,6 +169,7 @@ public class SimulationLifecycleService implements SimulationLifecycleCommandPor
         }
 
         SimulationSession session = sessionOptional.get();
+        recordStopTimeControlQuietly(session, protocolData);
         subscriptionManager.unsubscribe(session.getInstanceId());
         sessionManager.stopSession(session.getInstanceId());
         sessionManager.removeSession(session.getInstanceId());
@@ -157,5 +194,60 @@ public class SimulationLifecycleService implements SimulationLifecycleCommandPor
                 && ((BusinessException) exception).getCategory() == BusinessException.Category.TDENGINE_WRITE) {
             loggerMetrics.recordTdengineWriteFailure();
         }
+    }
+
+    /**
+     * 记录停止时间点，写入失败只记录日志，不阻断停止流程。
+     *
+     * @param session 会话对象。
+     * @param protocolData 协议数据。
+     */
+    private void recordStopTimeControlQuietly(SimulationSession session, ProtocolData protocolData) {
+        if (tdengineWriteService == null) {
+            return;
+        }
+        long simTime = resolveStopSimTime(session);
+        TimeControlRecordCommand command = TimeControlRecordCommand.builder()
+                .instanceId(session.getInstanceId())
+                .simTime(simTime)
+                .rate(0D)
+                .senderId(protocolData.getSenderId())
+                .messageType(protocolData.getMessageType())
+                .messageCode(protocolData.getMessageCode())
+                .build();
+        try {
+            tdengineWriteService.writeTimeControl(command);
+            log.debug("result=time_control_stop_write_success instanceId={} topic=- messageType={} messageCode={} senderId={} simtime={} rate={}",
+                    command.getInstanceId(),
+                    command.getMessageType(),
+                    command.getMessageCode(),
+                    command.getSenderId(),
+                    command.getSimTime(),
+                    command.getRate());
+        } catch (RuntimeException exception) {
+            log.error("result=time_control_stop_write_failed instanceId={} topic=- messageType={} messageCode={} senderId={} simtime={} rate={} sessionState={} reason={}",
+                    command.getInstanceId(),
+                    command.getMessageType(),
+                    command.getMessageCode(),
+                    command.getSenderId(),
+                    command.getSimTime(),
+                    command.getRate(),
+                    session.getState(),
+                    exception.getMessage(),
+                    exception);
+        }
+    }
+
+    /**
+     * 获取停止时刻的仿真时间。
+     *
+     * @param session 会话对象。
+     * @return 停止时刻仿真时间。
+     */
+    private long resolveStopSimTime(SimulationSession session) {
+        if (!session.getSimulationClock().isInitialized()) {
+            return 0L;
+        }
+        return session.getSimulationClock().currentSimTimeMillis();
     }
 }
