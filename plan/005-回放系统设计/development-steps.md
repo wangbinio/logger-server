@@ -14,8 +14,8 @@
 | Phase 01 | replay-server 配置与消息入口 | 建立回放服务启动骨架、配置模型、全局监听器和实例级控制消息处理器 | Phase 00 | 已完成 | [phase-01.md](E:\project\5y\logger-server\plan\005-回放系统设计\phases\phase-01.md) |
 | Phase 02 | TDengine 查询与表分类 | 实现控制时间点查询、态势子表元数据发现、事件表与周期表分类、帧数据分页查询 | Phase 00, Phase 01 | 已完成 | [phase-02.md](E:\project\5y\logger-server\plan\005-回放系统设计\phases\phase-02.md) |
 | Phase 03 | 回放领域模型 | 实现 `ReplayClock`、`ReplaySession`、状态机和会话管理器 | Phase 00, Phase 01 | 已完成 | [phase-03.md](E:\project\5y\logger-server\plan\005-回放系统设计\phases\phase-03.md) |
-| Phase 04 | 发布与连续调度 | 实现协议包重组、RocketMQ 发布、连续回放窗口查询和成功发布后推进水位 | Phase 02, Phase 03 | 未开始 | [phase-04.md](E:\project\5y\logger-server\plan\005-回放系统设计\phases\phase-04.md) |
-| Phase 05 | 控制命令与时间跳转 | 实现开始、暂停、继续、倍速、向前跳转、向后跳转和周期快照发布 | Phase 03, Phase 04 | 未开始 | [phase-05.md](E:\project\5y\logger-server\plan\005-回放系统设计\phases\phase-05.md) |
+| Phase 04 | 发布与连续调度 | 实现协议包重组、RocketMQ 发布、连续回放窗口查询和成功发布后推进水位 | Phase 02, Phase 03 | 已完成 | [phase-04.md](E:\project\5y\logger-server\plan\005-回放系统设计\phases\phase-04.md) |
+| Phase 05 | 控制命令与时间跳转 | 实现开始、暂停、继续、倍速、向前跳转、向后跳转和周期快照发布 | Phase 03, Phase 04 | 已完成 | [phase-05.md](E:\project\5y\logger-server\plan\005-回放系统设计\phases\phase-05.md) |
 | Phase 06 | 联调验收与交付收尾 | 完成集成测试、真实环境开关、日志指标、文档收敛和验收清单 | Phase 00, Phase 01, Phase 02, Phase 03, Phase 04, Phase 05 | 未开始 | [phase-06.md](E:\project\5y\logger-server\plan\005-回放系统设计\phases\phase-06.md) |
 
 ## 3. 阶段依赖关系图
@@ -57,6 +57,8 @@ Phase 00 多模块拆分与 common 基线
 - Phase 01 已完成：`replay-server` 已具备配置绑定、回放消息常量、全局回放任务监听、实例级回放控制处理器和只订阅 `broadcast-{instanceId}` 的动态订阅管理器。
 - Phase 02 已完成：`replay-server` 已具备独立 TDengine 查询配置、态势子表 tag 元数据发现、事件/周期表分类、时间范围解析和分页帧查询能力。
 - Phase 03 已完成：`replay-server` 已具备回放时钟、回放会话状态机、会话聚合根和会话管理器，后续发布调度与控制跳转可基于该内存领域模型推进。
+- Phase 04 已完成：`replay-server` 已具备回放态势协议包重组、RocketMQ 同步发布适配、失败重试、帧稳定归并和连续窗口调度能力；调度器只在发布成功后推进 `lastDispatchedSimTime`，自然到达结束时间后进入 `COMPLETED` 并保留控制订阅。
+- Phase 05 已完成：`replay-server` 已具备回放任务创建/停止、元信息通知、开始/暂停/继续/倍速控制、向前/向后/原地跳转、事件补偿发布和周期表最后一帧快照发布能力；跳转发布失败时不推进水位。
 
 ## 7. 当前无需澄清的问题
 

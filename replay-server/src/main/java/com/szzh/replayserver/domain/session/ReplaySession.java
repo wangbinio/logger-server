@@ -236,6 +236,21 @@ public class ReplaySession {
     }
 
     /**
+     * 同步已成功发布的仿真时间水位。
+     *
+     * @param simTime 已成功发布的仿真时间。
+     */
+    public synchronized void syncLastDispatchedSimTime(long simTime) {
+        if (simTime < simulationStartTime) {
+            throw new IllegalArgumentException("回放水位不能小于开始时间");
+        }
+        if (simTime > simulationEndTime) {
+            throw new IllegalArgumentException("回放水位不能超过结束时间");
+        }
+        this.lastDispatchedSimTime = simTime;
+    }
+
+    /**
      * 增加已发布帧数量。
      *
      * @param count 已发布帧数量。

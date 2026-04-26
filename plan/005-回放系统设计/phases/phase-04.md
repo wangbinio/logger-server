@@ -49,3 +49,14 @@
 ## 6. 当前无需澄清的问题
 
 本阶段没有阻塞性疑问。
+
+## 7. Review
+
+- 已完成 04-01 至 04-10：新增发布器、帧归并和调度器测试，并实现 `ReplayRocketMqProducerConfig`、`ReplayRocketMqSender`、`ReplaySituationPublisher`、`ReplayFrameMergeService`、`ReplayScheduler`。
+- 发布链路会将 `ReplayFrame` 的 senderId、messageType、messageCode 和 rawData 重新组装为平台协议包，发送到 `situation-{instanceId}`，并按配置重试；重试耗尽后抛出业务异常。
+- 连续调度按 `(lastDispatchedSimTime, currentReplayTime]` 查询事件表和周期表，归并后发布；只有全部发布成功才推进水位，发布或查询失败时会话进入失败态且水位不推进。
+- 自然结束逻辑已实现：窗口到达 `simulationEndTime` 后会话迁移到 `COMPLETED`，不自动取消 `broadcast-{instanceId}` 控制订阅。
+- 已补充 `rocketmq.producer.group=replay-producer`，满足 RocketMQ 生产者自动配置前置条件；常规测试上下文仍通过排除自动配置保持外部依赖隔离。
+- 验证通过：`mvn -pl replay-server -am test`，`common` 12 个测试通过，`replay-server` 65 个测试通过。
+- 验证通过：`mvn test`，`common` 12 个测试通过，`logger-server` 59 个测试中 2 个按现有开关跳过，`replay-server` 65 个测试通过。
+- 遗留边界：本阶段不处理时间跳转后的补偿发布，向前跳转、向后跳转和周期快照补发留给 Phase 05。

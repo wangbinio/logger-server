@@ -64,3 +64,16 @@
 ## 6. 当前无需澄清的问题
 
 本阶段没有阻塞性疑问。
+
+## 7. Review
+
+- 已完成 05-01 至 05-12：新增 `ReplayCreatePayload`、`ReplayMetadataPayload`、`ReplayRatePayload`、`ReplayJumpPayload`，并实现 `ReplayMetadataService`、`ReplayLifecycleService`、`ReplayControlService`、`ReplayJumpService`。
+- 生命周期链路已接入现有监听端口：全局创建消息会查询时间范围、发现子表、分类事件/周期表、创建 READY 会话、订阅 `broadcast-{instanceId}` 并发布 `messageType=1200,messageCode=9` 元信息；停止消息会停止调度、取消 `broadcast-{instanceId}` 订阅并移除会话。
+- 控制链路已接入现有实例控制端口：启动会话并调度，暂停会话并取消调度，继续会话并恢复调度，运行或暂停状态下可修改倍率，非法倍率、非法跳转 payload 和缺失会话会被安全忽略。
+- 跳转链路已实现：向后跳转发布 `[simulationStartTime, targetTime]` 事件数据，向前跳转发布 `(currentTime, targetTime]` 事件数据，原地跳转不补发事件；三种跳转都会发布每张周期表在目标时间前的最后一帧。
+- 跳转期间会暂停运行中的连续调度窗口推进；跳转成功后同步 `ReplayClock` 和 `lastDispatchedSimTime`，原先运行的会话恢复运行，原先暂停或 READY 的会话保持原状态。
+- `ReplaySession` 新增水位同步方法，用于向后跳转时把 `lastDispatchedSimTime` 设置为目标时间；普通连续调度仍使用只允许前进的水位推进方法。
+- 验证通过：Phase 05 定向测试 `mvn -pl replay-server -am -DfailIfNoTests=false -Dtest='ReplayPayloadTest,ReplayMetadataServiceTest,ReplayLifecycleServiceTest,ReplayControlServiceTest,ReplayJumpServiceTest' test`，19 个测试通过。
+- 验证通过：`mvn -pl replay-server -am test`，`common` 12 个测试通过，`replay-server` 84 个测试通过。
+- 验证通过：`mvn test`，`common` 12 个测试通过，`logger-server` 59 个测试中 1 个真实环境开关测试跳过，`replay-server` 84 个测试通过。
+- 遗留边界：本阶段仍不发布状态重置协议，不引入 Redis，不处理多个并发回放实例 ID 对同一源实例的扩展；真实 RocketMQ 与 TDengine 全链路验收留给 Phase 06 的显式真实环境测试。
