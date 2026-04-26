@@ -55,6 +55,30 @@
 - 动态订阅管理器只订阅 `broadcast-{instanceId}`。
 - 消息解析失败只记录指标或日志，不导致监听线程退出。
 
-## 6. 当前无需澄清的问题
+## 6. Review
+
+### 6.1 实际改动
+
+- 新增 `ReplayServerProperties`，覆盖 `tdengine`、`rocketmq`、`protocol.messages`、`replay.query`、`replay.scheduler`、`replay.publish` 和事件消息配置域。
+- 新增 `ReplayMessageConstants`，从配置生成回放全局消息与实例控制消息快照，并提供消息类型与消息码判断方法。
+- 新增 `ReplayLifecycleCommandPort` 和 `ReplayControlCommandPort`，为后续生命周期服务和控制服务预留委派边界。
+- 新增 `ReplayGlobalBroadcastListener`，固定监听 `broadcast-global`，只处理 `messageType=1` 的回放创建与停止消息。
+- 新增 `ReplayInstanceBroadcastMessageHandler`，只处理 `messageType=1200` 的启动、暂停、继续、倍速和时间跳转消息，并忽略 `messageCode=9` 元信息通知。
+- 新增 `ReplayRocketMqConsumerFactory` 与 `ReplayTopicSubscriptionManager`，动态订阅只创建 `broadcast-{instanceId}` 消费者，不创建或管理 `situation-{instanceId}` 消费者。
+- `ReplayServerApplication` 显式启用 `ReplayServerProperties` 与 `RocketMQProperties` 配置绑定，保证上下文测试在排除 RocketMQ 自动配置时仍能加载回放侧 Bean。
+
+### 6.2 验证结果
+
+- TDD 首轮 `mvn -pl replay-server -am test` 已按预期失败，失败原因为回放配置、消息常量和 MQ 入口生产类尚未实现。
+- 实现后 `mvn -pl replay-server -am test` 通过，`common` 12 个测试通过，`replay-server` 22 个测试通过。
+- 完整 `mvn test` 通过，完整 reactor `logger-platform`、`common`、`logger-server`、`replay-server` 全部成功；其中 `logger-server` 59 个测试运行，0 失败，0 错误，1 个真实环境测试按设计跳过；`replay-server` 22 个测试全部通过。
+
+### 6.3 遗留风险
+
+- 本阶段只完成消息入口与动态订阅管理，不读取 TDengine、不创建 `ReplaySession`、不发布态势数据。
+- `ReplayLifecycleCommandPort` 与 `ReplayControlCommandPort` 当前只有委派边界，实际状态机将在后续 Phase 03、Phase 04、Phase 05 中落地。
+- 动态订阅管理器已按 Phase 01 要求单实例串行消费，但真实 RocketMQ 环境下的 topic 创建、路由和消息投递仍留到 Phase 06 联调验收。
+
+## 7. 当前无需澄清的问题
 
 本阶段没有阻塞性疑问。
