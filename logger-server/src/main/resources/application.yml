@@ -23,7 +23,7 @@ logger-server:
         stop-message-code: 1
 
       # broadcast-{ScenarioInstanceID} 仿真控制指令
-      instance:
+      control:
         # 类型编号
         message-type: 1100
         # 仿真启动控制指令

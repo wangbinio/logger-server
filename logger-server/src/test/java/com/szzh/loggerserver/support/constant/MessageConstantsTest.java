@@ -34,10 +34,10 @@ class MessageConstantsTest {
     @Test
     void shouldReadConfiguredInstanceControlCodes() {
         LoggerServerProperties properties = new LoggerServerProperties();
-        properties.getProtocol().getMessages().getInstance().setMessageType(2100);
-        properties.getProtocol().getMessages().getInstance().setStartMessageCode(7);
-        properties.getProtocol().getMessages().getInstance().setPauseMessageCode(8);
-        properties.getProtocol().getMessages().getInstance().setResumeMessageCode(9);
+        properties.getProtocol().getMessages().getControl().setMessageType(2100);
+        properties.getProtocol().getMessages().getControl().setStartMessageCode(7);
+        properties.getProtocol().getMessages().getControl().setPauseMessageCode(8);
+        properties.getProtocol().getMessages().getControl().setResumeMessageCode(9);
 
         MessageConstants constants = new MessageConstants(properties);
 

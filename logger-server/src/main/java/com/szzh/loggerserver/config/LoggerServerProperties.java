@@ -58,7 +58,7 @@ public class LoggerServerProperties {
 
         private final Global global = new Global();
 
-        private final Instance instance = new Instance();
+        private final Control control = new Control();
     }
 
     /**
@@ -78,7 +78,7 @@ public class LoggerServerProperties {
      * 实例控制消息配置。
      */
     @Data
-    public static class Instance {
+    public static class Control {
 
         private int messageType = 1100;
 

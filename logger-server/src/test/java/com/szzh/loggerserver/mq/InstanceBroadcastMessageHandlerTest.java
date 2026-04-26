@@ -22,8 +22,8 @@ class InstanceBroadcastMessageHandlerTest {
     @Test
     void shouldHandleConfiguredInstanceStartMessage() {
         LoggerServerProperties properties = new LoggerServerProperties();
-        properties.getProtocol().getMessages().getInstance().setMessageType(2100);
-        properties.getProtocol().getMessages().getInstance().setStartMessageCode(7);
+        properties.getProtocol().getMessages().getControl().setMessageType(2100);
+        properties.getProtocol().getMessages().getControl().setStartMessageCode(7);
         MessageConstants messageConstants = new MessageConstants(properties);
         SimulationControlCommandPort commandPort = Mockito.mock(SimulationControlCommandPort.class);
         InstanceBroadcastMessageHandler handler =

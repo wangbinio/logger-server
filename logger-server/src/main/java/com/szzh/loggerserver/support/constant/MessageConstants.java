@@ -80,10 +80,10 @@ public class MessageConstants {
         this.globalMessageType = messages.getGlobal().getMessageType();
         this.globalCreateMessageCode = messages.getGlobal().getCreateMessageCode();
         this.globalStopMessageCode = messages.getGlobal().getStopMessageCode();
-        this.instanceControlMessageType = messages.getInstance().getMessageType();
-        this.instanceStartMessageCode = messages.getInstance().getStartMessageCode();
-        this.instancePauseMessageCode = messages.getInstance().getPauseMessageCode();
-        this.instanceResumeMessageCode = messages.getInstance().getResumeMessageCode();
+        this.instanceControlMessageType = messages.getControl().getMessageType();
+        this.instanceStartMessageCode = messages.getControl().getStartMessageCode();
+        this.instancePauseMessageCode = messages.getControl().getPauseMessageCode();
+        this.instanceResumeMessageCode = messages.getControl().getResumeMessageCode();
     }
 
     /**

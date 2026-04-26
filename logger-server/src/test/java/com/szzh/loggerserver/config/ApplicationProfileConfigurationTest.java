@@ -39,6 +39,20 @@ class ApplicationProfileConfigurationTest {
     }
 
     /**
+     * 验证记录侧实例控制消息使用 control 节点承载，避免与业务实例标识语义混淆。
+     */
+    @Test
+    void shouldUseControlNodeForInstanceControlMessages() {
+        Properties properties = loadYaml("application.yml");
+
+        Assertions.assertNull(properties.getProperty("logger-server.protocol.messages.instance.message-type"));
+        Assertions.assertEquals("1100", properties.getProperty("logger-server.protocol.messages.control.message-type"));
+        Assertions.assertEquals("1", properties.getProperty("logger-server.protocol.messages.control.start-message-code"));
+        Assertions.assertEquals("5", properties.getProperty("logger-server.protocol.messages.control.pause-message-code"));
+        Assertions.assertEquals("6", properties.getProperty("logger-server.protocol.messages.control.resume-message-code"));
+    }
+
+    /**
      * 加载指定 YAML 配置文件。
      *
      * @param resourceName 资源文件名。
