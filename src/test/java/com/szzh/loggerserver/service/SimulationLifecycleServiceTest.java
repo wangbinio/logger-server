@@ -32,6 +32,7 @@ class SimulationLifecycleServiceTest {
         SimulationSession session = sessionManager.requireSession("instance-001");
         Assertions.assertEquals(SimulationSessionState.READY, session.getState());
         Mockito.verify(schemaService).createStableIfAbsent("instance-001");
+        Mockito.verify(schemaService).createTimeControlTableIfAbsent("instance-001");
         Mockito.verify(subscriptionManager).subscribe("instance-001");
     }
 
@@ -52,6 +53,7 @@ class SimulationLifecycleServiceTest {
         Assertions.assertEquals(1, sessionManager.size());
         Assertions.assertEquals(SimulationSessionState.READY, sessionManager.requireSession("instance-001").getState());
         Mockito.verify(schemaService, Mockito.times(1)).createStableIfAbsent("instance-001");
+        Mockito.verify(schemaService, Mockito.times(1)).createTimeControlTableIfAbsent("instance-001");
         Mockito.verify(subscriptionManager, Mockito.times(1)).subscribe("instance-001");
     }
 
@@ -75,6 +77,29 @@ class SimulationLifecycleServiceTest {
         SimulationSession session = sessionManager.requireSession("instance-001");
         Assertions.assertEquals(SimulationSessionState.FAILED, session.getState());
         Assertions.assertEquals("schema boom", session.getLastErrorMessage());
+        Mockito.verify(subscriptionManager, Mockito.never()).subscribe(Mockito.anyString());
+    }
+
+    /**
+     * 验证控制时间点表创建失败时会沿用初始化失败语义。
+     */
+    @Test
+    void shouldMarkSessionFailedWhenTimeControlTableInitializationFails() {
+        SimulationSessionManager sessionManager = new SimulationSessionManager();
+        TdengineSchemaService schemaService = Mockito.mock(TdengineSchemaService.class);
+        TopicSubscriptionManager subscriptionManager = Mockito.mock(TopicSubscriptionManager.class);
+        SimulationLifecycleService lifecycleService =
+                new SimulationLifecycleService(sessionManager, schemaService, subscriptionManager);
+
+        Mockito.doThrow(new IllegalStateException("time control schema boom"))
+                .when(schemaService)
+                .createTimeControlTableIfAbsent("instance-001");
+
+        Assertions.assertThrows(IllegalStateException.class,
+                () -> lifecycleService.handleCreate(buildCreateProtocol("instance-001")));
+        SimulationSession session = sessionManager.requireSession("instance-001");
+        Assertions.assertEquals(SimulationSessionState.FAILED, session.getState());
+        Assertions.assertEquals("time control schema boom", session.getLastErrorMessage());
         Mockito.verify(subscriptionManager, Mockito.never()).subscribe(Mockito.anyString());
     }
 

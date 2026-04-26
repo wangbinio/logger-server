@@ -88,6 +88,7 @@ public class SimulationLifecycleService implements SimulationLifecycleCommandPor
         SimulationSession session = sessionManager.createSession(payload.getInstanceId());
         try {
             schemaService.createStableIfAbsent(session.getInstanceId());
+            schemaService.createTimeControlTableIfAbsent(session.getInstanceId());
             subscriptionManager.subscribe(session.getInstanceId());
             session.updateState(SimulationSessionState.READY);
             loggerMetrics.setActiveSessionCount(sessionManager.size());

@@ -3,6 +3,7 @@ package com.szzh.loggerserver.service;
 import com.szzh.loggerserver.domain.session.SimulationSession;
 import com.szzh.loggerserver.domain.session.SimulationSessionManager;
 import com.szzh.loggerserver.domain.session.SimulationSessionState;
+import com.szzh.loggerserver.model.dto.TimeControlRecordCommand;
 import com.szzh.loggerserver.mq.SimulationControlCommandPort;
 import com.szzh.loggerserver.support.metric.LoggerMetrics;
 import com.szzh.loggerserver.util.ProtocolData;
@@ -26,13 +27,26 @@ public class SimulationControlService implements SimulationControlCommandPort {
 
     private final LoggerMetrics loggerMetrics;
 
+    private final TdengineWriteService tdengineWriteService;
+
     /**
      * 创建仿真控制服务。
      *
      * @param sessionManager 会话管理器。
      */
     public SimulationControlService(SimulationSessionManager sessionManager) {
-        this(sessionManager, new LoggerMetrics());
+        this(sessionManager, new LoggerMetrics(), null);
+    }
+
+    /**
+     * 创建仿真控制服务。
+     *
+     * @param sessionManager 会话管理器。
+     * @param tdengineWriteService TDengine 写入服务。
+     */
+    public SimulationControlService(SimulationSessionManager sessionManager,
+                                    TdengineWriteService tdengineWriteService) {
+        this(sessionManager, new LoggerMetrics(), tdengineWriteService);
     }
 
     /**
@@ -41,10 +55,25 @@ public class SimulationControlService implements SimulationControlCommandPort {
      * @param sessionManager 会话管理器。
      * @param loggerMetrics 日志指标封装。
      */
+    public SimulationControlService(SimulationSessionManager sessionManager,
+                                    LoggerMetrics loggerMetrics) {
+        this(sessionManager, loggerMetrics, null);
+    }
+
+    /**
+     * 创建仿真控制服务。
+     *
+     * @param sessionManager 会话管理器。
+     * @param loggerMetrics 日志指标封装。
+     * @param tdengineWriteService TDengine 写入服务。
+     */
     @Autowired
-    public SimulationControlService(SimulationSessionManager sessionManager, LoggerMetrics loggerMetrics) {
+    public SimulationControlService(SimulationSessionManager sessionManager,
+                                    LoggerMetrics loggerMetrics,
+                                    TdengineWriteService tdengineWriteService) {
         this.sessionManager = Objects.requireNonNull(sessionManager, "sessionManager 不能为空");
         this.loggerMetrics = Objects.requireNonNull(loggerMetrics, "loggerMetrics 不能为空");
+        this.tdengineWriteService = tdengineWriteService;
     }
 
     /**
@@ -75,6 +104,7 @@ public class SimulationControlService implements SimulationControlCommandPort {
                     session.getSimulationClock().start();
                 }
             });
+            recordTimeControlQuietly(session, protocolData, 1D);
             log.info("result=start_success instanceId={} topic=- messageType={} messageCode={} senderId={} simtime={} sessionState={}",
                     instanceId,
                     protocolData.getMessageType(),
@@ -114,10 +144,11 @@ public class SimulationControlService implements SimulationControlCommandPort {
              * 执行时钟暂停。
              */
             @Override
-                public void apply() {
-                    session.getSimulationClock().pause();
-                }
-            });
+            public void apply() {
+                session.getSimulationClock().pause();
+            }
+        });
+        recordTimeControlQuietly(session, protocolData, 0D);
         log.info("result=pause_success instanceId={} topic=- messageType={} messageCode={} senderId={} simtime={} sessionState={}",
                 instanceId,
                 protocolData.getMessageType(),
@@ -154,10 +185,11 @@ public class SimulationControlService implements SimulationControlCommandPort {
              * 执行时钟恢复。
              */
             @Override
-                public void apply() {
-                    session.getSimulationClock().resume();
-                }
-            });
+            public void apply() {
+                session.getSimulationClock().resume();
+            }
+        });
+        recordTimeControlQuietly(session, protocolData, 1D);
         log.info("result=resume_success instanceId={} topic=- messageType={} messageCode={} senderId={} simtime={} sessionState={}",
                 instanceId,
                 protocolData.getMessageType(),
@@ -183,6 +215,51 @@ public class SimulationControlService implements SimulationControlCommandPort {
         } catch (RuntimeException exception) {
             session.recordFailure(exception.getMessage());
             throw exception;
+        }
+    }
+
+    /**
+     * 记录控制时间点，写入失败只记录日志，不阻断控制流程。
+     *
+     * @param session 仿真实例会话。
+     * @param protocolData 协议数据。
+     * @param rate 控制命令生效后的回放倍率。
+     */
+    private void recordTimeControlQuietly(SimulationSession session,
+                                          ProtocolData protocolData,
+                                          double rate) {
+        if (tdengineWriteService == null) {
+            return;
+        }
+        long simTime = session.getSimulationClock().currentSimTimeMillis();
+        TimeControlRecordCommand command = TimeControlRecordCommand.builder()
+                .instanceId(session.getInstanceId())
+                .simTime(simTime)
+                .rate(rate)
+                .senderId(protocolData.getSenderId())
+                .messageType(protocolData.getMessageType())
+                .messageCode(protocolData.getMessageCode())
+                .build();
+        try {
+            tdengineWriteService.writeTimeControl(command);
+            log.debug("result=time_control_write_success instanceId={} topic=- messageType={} messageCode={} senderId={} simtime={} rate={}",
+                    command.getInstanceId(),
+                    command.getMessageType(),
+                    command.getMessageCode(),
+                    command.getSenderId(),
+                    command.getSimTime(),
+                    command.getRate());
+        } catch (RuntimeException exception) {
+            log.error("result=time_control_write_failed instanceId={} topic=- messageType={} messageCode={} senderId={} simtime={} rate={} sessionState={} reason={}",
+                    command.getInstanceId(),
+                    command.getMessageType(),
+                    command.getMessageCode(),
+                    command.getSenderId(),
+                    command.getSimTime(),
+                    command.getRate(),
+                    session.getState(),
+                    exception.getMessage(),
+                    exception);
         }
     }
 

@@ -1,6 +1,8 @@
 package com.szzh.loggerserver.service;
 
 import com.szzh.loggerserver.model.dto.SituationRecordCommand;
+import com.szzh.loggerserver.model.dto.TimeControlRecordCommand;
+import com.szzh.loggerserver.support.exception.BusinessException;
 import com.taosdata.jdbc.ws.TSWSPreparedStatement;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
@@ -82,6 +84,64 @@ class TdengineWriteServiceTest {
         Assertions.assertThrows(RuntimeException.class, () -> writeService.write(command));
         Mockito.verify(jdbcTemplate, Mockito.times(3))
                 .update(Mockito.anyString(), Mockito.any(org.springframework.jdbc.core.PreparedStatementSetter.class));
+    }
+
+    /**
+     * 验证控制时间点写入会正确设置参数顺序。
+     */
+    @Test
+    void shouldWriteTimeControlRecord() {
+        JdbcTemplate jdbcTemplate = Mockito.mock(JdbcTemplate.class);
+        DataSource dataSource = Mockito.mock(DataSource.class);
+        TdengineWriteService writeService = new TdengineWriteService(jdbcTemplate, dataSource, 3);
+        TimeControlRecordCommand command = TimeControlRecordCommand.builder()
+                .instanceId("instance-001")
+                .senderId(11)
+                .messageType(2100)
+                .messageCode(7)
+                .simTime(123456L)
+                .rate(0D)
+                .build();
+
+        writeService.writeTimeControl(command);
+
+        ArgumentCaptor<String> sqlCaptor = ArgumentCaptor.forClass(String.class);
+        Mockito.verify(jdbcTemplate).update(sqlCaptor.capture(),
+                Mockito.eq(123456L),
+                Mockito.eq(0D),
+                Mockito.eq(11),
+                Mockito.eq(2100),
+                Mockito.eq(7));
+        Assertions.assertEquals("INSERT INTO time_control_instance_001 VALUES (NOW, ?, ?, ?, ?, ?)",
+                sqlCaptor.getValue());
+    }
+
+    /**
+     * 验证控制时间点写入失败时会按次数重试。
+     */
+    @Test
+    void shouldRetryWhenWriteTimeControlFails() {
+        JdbcTemplate jdbcTemplate = Mockito.mock(JdbcTemplate.class);
+        DataSource dataSource = Mockito.mock(DataSource.class);
+        TdengineWriteService writeService = new TdengineWriteService(jdbcTemplate, dataSource, 2);
+        TimeControlRecordCommand command = TimeControlRecordCommand.builder()
+                .instanceId("instance-001")
+                .senderId(11)
+                .messageType(2100)
+                .messageCode(7)
+                .simTime(123456L)
+                .rate(1D)
+                .build();
+
+        Mockito.doThrow(new RuntimeException("db error"))
+                .when(jdbcTemplate)
+                .update(Mockito.anyString(), Mockito.any(), Mockito.any(), Mockito.any(), Mockito.any(), Mockito.any());
+
+        BusinessException exception = Assertions.assertThrows(BusinessException.class,
+                () -> writeService.writeTimeControl(command));
+        Assertions.assertEquals(BusinessException.Category.TDENGINE_WRITE, exception.getCategory());
+        Mockito.verify(jdbcTemplate, Mockito.times(2))
+                .update(Mockito.anyString(), Mockito.any(), Mockito.any(), Mockito.any(), Mockito.any(), Mockito.any());
     }
 
     /**

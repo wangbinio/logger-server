@@ -32,4 +32,14 @@ public class TdengineSchemaService {
         String sql = TdengineConstants.buildCreateStableSql(instanceId);
         jdbcTemplate.execute(sql);
     }
+
+    /**
+     * 按实例创建控制时间点表。
+     *
+     * @param instanceId 仿真实例 ID。
+     */
+    public void createTimeControlTableIfAbsent(String instanceId) {
+        String sql = TdengineConstants.buildCreateTimeControlTableSql(instanceId);
+        jdbcTemplate.execute(sql);
+    }
 }

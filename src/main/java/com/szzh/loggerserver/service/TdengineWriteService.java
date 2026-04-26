@@ -2,6 +2,7 @@ package com.szzh.loggerserver.service;
 
 import com.szzh.loggerserver.config.LoggerServerProperties;
 import com.szzh.loggerserver.model.dto.SituationRecordCommand;
+import com.szzh.loggerserver.model.dto.TimeControlRecordCommand;
 import com.szzh.loggerserver.support.exception.BusinessException;
 import com.szzh.loggerserver.support.constant.TdengineConstants;
 import com.taosdata.jdbc.ws.TSWSPreparedStatement;
@@ -95,6 +96,41 @@ public class TdengineWriteService {
     }
 
     /**
+     * 写入仿真控制时间点。
+     *
+     * @param command 控制时间点写入命令。
+     */
+    public void writeTimeControl(TimeControlRecordCommand command) {
+        TimeControlRecordCommand validatedCommand = requireTimeControlCommand(command);
+        String sql = TdengineConstants.buildInsertTimeControlSql(validatedCommand.getInstanceId());
+
+        RuntimeException lastException = null;
+        for (int attempt = 0; attempt < retryTimes; attempt++) {
+            try {
+                jdbcTemplate.update(sql,
+                        validatedCommand.getSimTime(),
+                        validatedCommand.getRate(),
+                        validatedCommand.getSenderId(),
+                        validatedCommand.getMessageType(),
+                        validatedCommand.getMessageCode());
+                return;
+            } catch (RuntimeException exception) {
+                lastException = exception;
+                log.warn("result=time_control_write_retry_failed instanceId={} topic=- messageType={} messageCode={} senderId={} simtime={} rate={} attempt={} reason={}",
+                        validatedCommand.getInstanceId(),
+                        validatedCommand.getMessageType(),
+                        validatedCommand.getMessageCode(),
+                        validatedCommand.getSenderId(),
+                        validatedCommand.getSimTime(),
+                        validatedCommand.getRate(),
+                        attempt + 1,
+                        exception.getMessage());
+            }
+        }
+        throw BusinessException.tdengineWrite("TDengine 控制时间点写入失败", lastException);
+    }
+
+    /**
      * 使用 TaosPrepareStatement 批量写入。
      *
      * @param commands 写入命令集合。
@@ -171,6 +207,19 @@ public class TdengineWriteService {
     private SituationRecordCommand requireCommand(SituationRecordCommand command) {
         if (command == null) {
             throw new IllegalArgumentException("写入命令不能为空");
+        }
+        return command;
+    }
+
+    /**
+     * 校验控制时间点写入命令。
+     *
+     * @param command 控制时间点写入命令。
+     * @return 原始写入命令。
+     */
+    private TimeControlRecordCommand requireTimeControlCommand(TimeControlRecordCommand command) {
+        if (command == null) {
+            throw new IllegalArgumentException("控制时间点写入命令不能为空");
         }
         return command;
     }

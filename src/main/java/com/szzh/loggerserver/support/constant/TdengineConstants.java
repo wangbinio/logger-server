@@ -9,6 +9,8 @@ public final class TdengineConstants {
 
     public static final String STABLE_PREFIX = "situation_";
 
+    public static final String TIME_CONTROL_PREFIX = "time_control_";
+
     public static final String CREATE_STABLE_SQL_TEMPLATE =
             "CREATE STABLE IF NOT EXISTS %s (ts TIMESTAMP, simtime BIGINT, rawdata VARBINARY(8192)) "
                     + "TAGS (sender_id INT, msgtype INT, msgcode INT)";
@@ -18,6 +20,13 @@ public final class TdengineConstants {
 
     public static final String INSERT_STMT_SQL_TEMPLATE =
             "INSERT INTO ? USING %s TAGS (?, ?, ?) VALUES (?, ?)";
+
+    public static final String CREATE_TIME_CONTROL_TABLE_SQL_TEMPLATE =
+            "CREATE TABLE IF NOT EXISTS %s (ts TIMESTAMP, simtime BIGINT, rate DOUBLE, "
+                    + "sender_id INT, msgtype INT, msgcode INT)";
+
+    public static final String INSERT_TIME_CONTROL_SQL_TEMPLATE =
+            "INSERT INTO %s VALUES (NOW, ?, ?, ?, ?, ?)";
 
     private TdengineConstants() {
     }
@@ -51,6 +60,16 @@ public final class TdengineConstants {
     }
 
     /**
+     * 构建控制时间点表名称。
+     *
+     * @param instanceId 仿真实例 ID。
+     * @return 控制时间点表名称。
+     */
+    public static String buildTimeControlTableName(String instanceId) {
+        return TIME_CONTROL_PREFIX + sanitizeIdentifier(instanceId);
+    }
+
+    /**
      * 构建创建超级表 SQL。
      *
      * @param instanceId 仿真实例 ID。
@@ -58,6 +77,16 @@ public final class TdengineConstants {
      */
     public static String buildCreateStableSql(String instanceId) {
         return String.format(CREATE_STABLE_SQL_TEMPLATE, buildStableName(instanceId));
+    }
+
+    /**
+     * 构建创建控制时间点表 SQL。
+     *
+     * @param instanceId 仿真实例 ID。
+     * @return 创建控制时间点表 SQL。
+     */
+    public static String buildCreateTimeControlTableSql(String instanceId) {
+        return String.format(CREATE_TIME_CONTROL_TABLE_SQL_TEMPLATE, buildTimeControlTableName(instanceId));
     }
 
     /**
@@ -83,6 +112,16 @@ public final class TdengineConstants {
      */
     public static String buildInsertStmtSql(String instanceId) {
         return String.format(INSERT_STMT_SQL_TEMPLATE, buildStableName(instanceId));
+    }
+
+    /**
+     * 构建控制时间点写入 SQL。
+     *
+     * @param instanceId 仿真实例 ID。
+     * @return 控制时间点写入 SQL。
+     */
+    public static String buildInsertTimeControlSql(String instanceId) {
+        return String.format(INSERT_TIME_CONTROL_SQL_TEMPLATE, buildTimeControlTableName(instanceId));
     }
 
     /**
