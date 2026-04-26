@@ -244,6 +244,43 @@ class ReplaySchedulerTest {
     }
 
     /**
+     * 验证连续回放按 batch-size 分批发布，并只在批次之间检查会话状态。
+     */
+    @Test
+    void shouldCheckSessionStateBetweenSchedulerPublishBatches() {
+        AtomicLong wallClock = new AtomicLong(1_000L);
+        ReplaySession session = runningSession(wallClock);
+        wallClock.set(1_500L);
+        ReplayFrame firstFrame = frame(eventTable, 1_100L);
+        ReplayFrame secondFrame = frame(eventTable, 1_200L);
+        ReplayFrame thirdFrame = frame(eventTable, 1_300L);
+        ReplayFrameRepository repository = Mockito.mock(ReplayFrameRepository.class);
+        ReplaySituationPublisher publisher = Mockito.mock(ReplaySituationPublisher.class);
+        Mockito.when(repository.findWindowFrames(Mockito.eq(eventTable), Mockito.eq(999L), Mockito.eq(1_500L),
+                        Mockito.any(ReplayCursor.class)))
+                .thenReturn(Arrays.asList(firstFrame, secondFrame, thirdFrame));
+        Mockito.when(repository.findWindowFrames(Mockito.eq(periodicTable), Mockito.eq(999L), Mockito.eq(1_500L),
+                        Mockito.any(ReplayCursor.class)))
+                .thenReturn(Collections.emptyList());
+        Mockito.doAnswer(invocation -> {
+                    session.pause();
+                    return null;
+                })
+                .when(publisher)
+                .publish(Mockito.eq("instance-001"), Mockito.eq(firstFrame));
+        ReplayScheduler scheduler =
+                new ReplayScheduler(repository, new ReplayFrameMergeService(), publisher, 10, 50L, 2);
+
+        scheduler.tick(session);
+
+        ArgumentCaptor<ReplayFrame> frameCaptor = ArgumentCaptor.forClass(ReplayFrame.class);
+        Mockito.verify(publisher, Mockito.times(2)).publish(Mockito.eq("instance-001"), frameCaptor.capture());
+        Assertions.assertEquals(Arrays.asList(firstFrame, secondFrame), frameCaptor.getAllValues());
+        Assertions.assertEquals(1_200L, session.getLastDispatchedSimTime());
+        Assertions.assertEquals(ReplaySessionState.PAUSED, session.getState());
+    }
+
+    /**
      * 创建运行中的测试会话。
      *
      * @param wallClock 墙钟时间。

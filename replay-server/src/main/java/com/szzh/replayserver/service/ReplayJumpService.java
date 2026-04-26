@@ -34,6 +34,8 @@ public class ReplayJumpService {
 
     private final int pageSize;
 
+    private final int batchSize;
+
     /**
      * 创建回放时间跳转服务。
      *
@@ -53,6 +55,7 @@ public class ReplayJumpService {
                 frameMergeService,
                 situationPublisher,
                 properties.getReplay().getQuery().getPageSize(),
+                properties.getReplay().getPublish().getBatchSize(),
                 replayMetrics);
     }
 
@@ -78,6 +81,23 @@ public class ReplayJumpService {
      * @param frameMergeService 回放帧归并服务。
      * @param situationPublisher 回放态势发布器。
      * @param pageSize 查询分页大小。
+     * @param batchSize 发布批次大小。
+     */
+    public ReplayJumpService(ReplayFrameRepository frameRepository,
+                             ReplayFrameMergeService frameMergeService,
+                             ReplaySituationPublisher situationPublisher,
+                             int pageSize,
+                             int batchSize) {
+        this(frameRepository, frameMergeService, situationPublisher, pageSize, batchSize, new ReplayMetrics());
+    }
+
+    /**
+     * 创建回放时间跳转服务。
+     *
+     * @param frameRepository 回放帧 Repository。
+     * @param frameMergeService 回放帧归并服务。
+     * @param situationPublisher 回放态势发布器。
+     * @param pageSize 查询分页大小。
      * @param replayMetrics 回放指标。
      */
     public ReplayJumpService(ReplayFrameRepository frameRepository,
@@ -85,11 +105,31 @@ public class ReplayJumpService {
                              ReplaySituationPublisher situationPublisher,
                              int pageSize,
                              ReplayMetrics replayMetrics) {
+        this(frameRepository, frameMergeService, situationPublisher, pageSize, 500, replayMetrics);
+    }
+
+    /**
+     * 创建回放时间跳转服务。
+     *
+     * @param frameRepository 回放帧 Repository。
+     * @param frameMergeService 回放帧归并服务。
+     * @param situationPublisher 回放态势发布器。
+     * @param pageSize 查询分页大小。
+     * @param batchSize 发布批次大小。
+     * @param replayMetrics 回放指标。
+     */
+    public ReplayJumpService(ReplayFrameRepository frameRepository,
+                             ReplayFrameMergeService frameMergeService,
+                             ReplaySituationPublisher situationPublisher,
+                             int pageSize,
+                             int batchSize,
+                             ReplayMetrics replayMetrics) {
         this.frameRepository = Objects.requireNonNull(frameRepository, "frameRepository 不能为空");
         this.frameMergeService = Objects.requireNonNull(frameMergeService, "frameMergeService 不能为空");
         this.situationPublisher = Objects.requireNonNull(situationPublisher, "situationPublisher 不能为空");
         this.replayMetrics = Objects.requireNonNull(replayMetrics, "replayMetrics 不能为空");
         this.pageSize = Math.max(1, pageSize);
+        this.batchSize = Math.max(1, batchSize);
     }
 
     /**
@@ -112,8 +152,15 @@ public class ReplayJumpService {
                 replaySession.pause();
             }
             try {
-                publishJumpEvents(replaySession, currentTime, targetTime);
-                publishPeriodicSnapshots(replaySession, targetTime);
+                if (!publishJumpEvents(replaySession, currentTime, targetTime)) {
+                    return;
+                }
+                if (!publishPeriodicSnapshots(replaySession, targetTime)) {
+                    return;
+                }
+                if (!isJumpAccepted(replaySession.getState())) {
+                    return;
+                }
                 replaySession.jumpTo(targetTime);
                 replaySession.syncLastDispatchedSimTime(targetTime);
                 replayMetrics.recordJump();
@@ -134,12 +181,13 @@ public class ReplayJumpService {
      * @param currentTime 当前回放时间。
      * @param targetTime 目标回放时间。
      */
-    private void publishJumpEvents(ReplaySession session, long currentTime, long targetTime) {
+    private boolean publishJumpEvents(ReplaySession session, long currentTime, long targetTime) {
         if (targetTime < currentTime) {
-            publishFrames(session, querySafely(() -> queryBackwardEventFrames(session, targetTime)));
+            return publishFrames(session, querySafely(() -> queryBackwardEventFrames(session, targetTime)));
         } else if (targetTime > currentTime) {
-            publishFrames(session, querySafely(() -> queryForwardEventFrames(session, currentTime, targetTime)));
+            return publishFrames(session, querySafely(() -> queryForwardEventFrames(session, currentTime, targetTime)));
         }
+        return true;
     }
 
     /**
@@ -243,8 +291,8 @@ public class ReplayJumpService {
      * @param session 回放会话。
      * @param targetTime 目标回放时间。
      */
-    private void publishPeriodicSnapshots(ReplaySession session, long targetTime) {
-        publishFrames(session, querySafely(() -> queryPeriodicSnapshots(session, targetTime)));
+    private boolean publishPeriodicSnapshots(ReplaySession session, long targetTime) {
+        return publishFrames(session, querySafely(() -> queryPeriodicSnapshots(session, targetTime)));
     }
 
     /**
@@ -271,11 +319,23 @@ public class ReplayJumpService {
      * @param session 回放会话。
      * @param frames 帧列表。
      */
-    private void publishFrames(ReplaySession session, List<ReplayFrame> frames) {
-        for (ReplayFrame frame : frames) {
-            // 发布跳转补偿帧或周期快照帧。
-            situationPublisher.publish(session.getInstanceId(), frame);
+    private boolean publishFrames(ReplaySession session, List<ReplayFrame> frames) {
+        int index = 0;
+        while (index < frames.size()) {
+            if (!isJumpAccepted(session.getState())) {
+                return false;
+            }
+            int endExclusive = Math.min(index + batchSize, frames.size());
+            for (int frameIndex = index; frameIndex < endExclusive; frameIndex++) {
+                // 同一批次内保持补偿帧顺序发布，批次结束后再检查停止或失败状态。
+                situationPublisher.publish(session.getInstanceId(), frames.get(frameIndex));
+            }
+            if (!isJumpAccepted(session.getState())) {
+                return false;
+            }
+            index = endExclusive;
         }
+        return true;
     }
 
     /**

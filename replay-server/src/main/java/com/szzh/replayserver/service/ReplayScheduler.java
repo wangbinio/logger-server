@@ -45,6 +45,8 @@ public class ReplayScheduler {
 
     private final long tickMillis;
 
+    private final int batchSize;
+
     private final ScheduledExecutorService executorService;
 
     private final ConcurrentMap<String, ScheduledFuture<?>> scheduledTasks =
@@ -70,6 +72,7 @@ public class ReplayScheduler {
                 situationPublisher,
                 properties.getReplay().getQuery().getPageSize(),
                 properties.getReplay().getScheduler().getTickMillis(),
+                properties.getReplay().getPublish().getBatchSize(),
                 replayMetrics);
     }
 
@@ -98,6 +101,25 @@ public class ReplayScheduler {
      * @param situationPublisher 回放态势发布器。
      * @param pageSize 查询分页大小。
      * @param tickMillis 调度间隔。
+     * @param batchSize 发布批次大小。
+     */
+    public ReplayScheduler(ReplayFrameRepository frameRepository,
+                           ReplayFrameMergeService frameMergeService,
+                           ReplaySituationPublisher situationPublisher,
+                           int pageSize,
+                           long tickMillis,
+                           int batchSize) {
+        this(frameRepository, frameMergeService, situationPublisher, pageSize, tickMillis, batchSize, new ReplayMetrics());
+    }
+
+    /**
+     * 创建回放连续窗口调度器。
+     *
+     * @param frameRepository 回放帧查询 Repository。
+     * @param frameMergeService 回放帧归并服务。
+     * @param situationPublisher 回放态势发布器。
+     * @param pageSize 查询分页大小。
+     * @param tickMillis 调度间隔。
      * @param replayMetrics 回放指标。
      */
     public ReplayScheduler(ReplayFrameRepository frameRepository,
@@ -106,12 +128,34 @@ public class ReplayScheduler {
                            int pageSize,
                            long tickMillis,
                            ReplayMetrics replayMetrics) {
+        this(frameRepository, frameMergeService, situationPublisher, pageSize, tickMillis, 500, replayMetrics);
+    }
+
+    /**
+     * 创建回放连续窗口调度器。
+     *
+     * @param frameRepository 回放帧查询 Repository。
+     * @param frameMergeService 回放帧归并服务。
+     * @param situationPublisher 回放态势发布器。
+     * @param pageSize 查询分页大小。
+     * @param tickMillis 调度间隔。
+     * @param batchSize 发布批次大小。
+     * @param replayMetrics 回放指标。
+     */
+    public ReplayScheduler(ReplayFrameRepository frameRepository,
+                           ReplayFrameMergeService frameMergeService,
+                           ReplaySituationPublisher situationPublisher,
+                           int pageSize,
+                           long tickMillis,
+                           int batchSize,
+                           ReplayMetrics replayMetrics) {
         this.frameRepository = Objects.requireNonNull(frameRepository, "frameRepository 不能为空");
         this.frameMergeService = Objects.requireNonNull(frameMergeService, "frameMergeService 不能为空");
         this.situationPublisher = Objects.requireNonNull(situationPublisher, "situationPublisher 不能为空");
         this.replayMetrics = Objects.requireNonNull(replayMetrics, "replayMetrics 不能为空");
         this.pageSize = Math.max(1, pageSize);
         this.tickMillis = Math.max(1L, tickMillis);
+        this.batchSize = Math.max(1, batchSize);
         this.executorService = Executors.newSingleThreadScheduledExecutor(runnable -> {
             Thread thread = new Thread(runnable, "replay-scheduler");
             thread.setDaemon(true);
@@ -187,14 +231,16 @@ public class ReplayScheduler {
 
         try {
             List<ReplayFrame> frames = frameMergeService.merge(framePages);
-            for (ReplayFrame frame : frames) {
-                if (replaySession.getState() != ReplaySessionState.RUNNING) {
-                    return;
-                }
-                // 发布单帧回放态势数据。
-                situationPublisher.publish(replaySession.getInstanceId(), frame);
+            BatchPublishResult publishResult = publishFramesInBatches(replaySession, frames);
+            if (publishResult.getPublishedCount() > 0L) {
+                replaySession.addDispatchedFrameCount(publishResult.getPublishedCount());
             }
-            replaySession.addDispatchedFrameCount(frames.size());
+            if (!publishResult.isCompleted()) {
+                if (publishResult.getLastPublishedSimTime() > replaySession.getLastDispatchedSimTime()) {
+                    replaySession.advanceLastDispatchedSimTime(publishResult.getLastPublishedSimTime());
+                }
+                return;
+            }
             replaySession.advanceLastDispatchedSimTime(toInclusive);
             completeIfReachedEnd(replaySession, toInclusive);
         } catch (RuntimeException exception) {
@@ -279,6 +325,37 @@ public class ReplayScheduler {
     }
 
     /**
+     * 按配置批次发布连续回放帧，并在批次之间检查会话状态。
+     *
+     * @param session 回放会话。
+     * @param frames 已归并排序的回放帧。
+     * @return 批量发布结果。
+     */
+    private BatchPublishResult publishFramesInBatches(ReplaySession session, List<ReplayFrame> frames) {
+        int index = 0;
+        long publishedCount = 0L;
+        long lastPublishedSimTime = session.getLastDispatchedSimTime();
+        while (index < frames.size()) {
+            if (session.getState() != ReplaySessionState.RUNNING) {
+                return BatchPublishResult.interrupted(publishedCount, lastPublishedSimTime);
+            }
+            int endExclusive = Math.min(index + batchSize, frames.size());
+            for (int frameIndex = index; frameIndex < endExclusive; frameIndex++) {
+                ReplayFrame frame = frames.get(frameIndex);
+                // 同一批次内保持原始归并顺序发布，批次结束后再检查状态。
+                situationPublisher.publish(session.getInstanceId(), frame);
+                publishedCount++;
+                lastPublishedSimTime = Math.max(lastPublishedSimTime, frame.getSimTime());
+            }
+            if (session.getState() != ReplaySessionState.RUNNING) {
+                return BatchPublishResult.interrupted(publishedCount, lastPublishedSimTime);
+            }
+            index = endExclusive;
+        }
+        return BatchPublishResult.completed(publishedCount, lastPublishedSimTime);
+    }
+
+    /**
      * 获取会话内所有需要连续回放的表。
      *
      * @param session 回放会话。
@@ -327,5 +404,79 @@ public class ReplayScheduler {
             throw new IllegalArgumentException("instanceId 不能为空");
         }
         return instanceId.trim();
+    }
+
+    /**
+     * 连续回放批量发布结果。
+     */
+    private static class BatchPublishResult {
+
+        private final boolean completed;
+
+        private final long publishedCount;
+
+        private final long lastPublishedSimTime;
+
+        /**
+         * 创建批量发布结果。
+         *
+         * @param completed 是否完整发布。
+         * @param publishedCount 已发布数量。
+         * @param lastPublishedSimTime 最后发布时间。
+         */
+        private BatchPublishResult(boolean completed, long publishedCount, long lastPublishedSimTime) {
+            this.completed = completed;
+            this.publishedCount = publishedCount;
+            this.lastPublishedSimTime = lastPublishedSimTime;
+        }
+
+        /**
+         * 创建完整发布结果。
+         *
+         * @param publishedCount 已发布数量。
+         * @param lastPublishedSimTime 最后发布时间。
+         * @return 发布结果。
+         */
+        private static BatchPublishResult completed(long publishedCount, long lastPublishedSimTime) {
+            return new BatchPublishResult(true, publishedCount, lastPublishedSimTime);
+        }
+
+        /**
+         * 创建中断发布结果。
+         *
+         * @param publishedCount 已发布数量。
+         * @param lastPublishedSimTime 最后发布时间。
+         * @return 发布结果。
+         */
+        private static BatchPublishResult interrupted(long publishedCount, long lastPublishedSimTime) {
+            return new BatchPublishResult(false, publishedCount, lastPublishedSimTime);
+        }
+
+        /**
+         * 判断是否完整发布。
+         *
+         * @return 是否完整发布。
+         */
+        private boolean isCompleted() {
+            return completed;
+        }
+
+        /**
+         * 获取已发布数量。
+         *
+         * @return 已发布数量。
+         */
+        private long getPublishedCount() {
+            return publishedCount;
+        }
+
+        /**
+         * 获取最后发布时间。
+         *
+         * @return 最后发布时间。
+         */
+        private long getLastPublishedSimTime() {
+            return lastPublishedSimTime;
+        }
     }
 }

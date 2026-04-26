@@ -202,6 +202,46 @@ class ReplayJumpServiceTest {
     }
 
     /**
+     * 验证跳转按 batch-size 分批发布，并在批次之间检查停止状态。
+     */
+    @Test
+    void shouldStopJumpPublishingBetweenBatches() {
+        AtomicLong wallClock = new AtomicLong(1_000L);
+        ReplaySession session = runningSession(wallClock);
+        wallClock.set(1_500L);
+        session.advanceLastDispatchedSimTime(1_500L);
+        ReplayFrame firstFrame = frame(eventTable, 1_000L);
+        ReplayFrame secondFrame = frame(eventTable, 1_100L);
+        ReplayFrame thirdFrame = frame(eventTable, 1_200L);
+        ReplayFrame periodicSnapshot = frame(periodicTable, 1_100L);
+        ReplayFrameRepository repository = Mockito.mock(ReplayFrameRepository.class);
+        ReplaySituationPublisher publisher = Mockito.mock(ReplaySituationPublisher.class);
+        Mockito.when(repository.findBackwardJumpEventFrames(Mockito.eq(eventTable), Mockito.eq(1_000L),
+                        Mockito.eq(1_200L), Mockito.any(ReplayCursor.class)))
+                .thenReturn(Arrays.asList(firstFrame, secondFrame, thirdFrame))
+                .thenReturn(Collections.emptyList());
+        Mockito.when(repository.findPeriodicLastFrame(periodicTable, 1_200L))
+                .thenReturn(Optional.of(periodicSnapshot));
+        Mockito.doAnswer(invocation -> {
+                    session.stop();
+                    return null;
+                })
+                .when(publisher)
+                .publish(Mockito.eq("instance-001"), Mockito.eq(secondFrame));
+        ReplayJumpService jumpService =
+                new ReplayJumpService(repository, new ReplayFrameMergeService(), publisher, 10, 2);
+
+        jumpService.jump(session, 1_200L);
+
+        ArgumentCaptor<ReplayFrame> captor = ArgumentCaptor.forClass(ReplayFrame.class);
+        Mockito.verify(publisher, Mockito.times(2)).publish(Mockito.eq("instance-001"), captor.capture());
+        Assertions.assertEquals(Arrays.asList(firstFrame, secondFrame), captor.getAllValues());
+        Assertions.assertEquals(1_500L, session.getLastDispatchedSimTime());
+        Assertions.assertEquals(ReplaySessionState.STOPPED, session.getState());
+        Assertions.assertEquals(1_500L, session.getReplayClock().currentTime());
+    }
+
+    /**
      * 创建运行中的测试会话。
      *
      * @param wallClock 墙钟时间。

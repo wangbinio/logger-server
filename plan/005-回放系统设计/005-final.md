@@ -1050,6 +1050,12 @@ byte[] body = ProtocolMessageUtil.buildData(
 
 后续如需严格实时追赶，可增加限速、丢弃周期中间帧或背压策略。第一版不丢弃事件数据。
 
+Phase 05 修复闭环后，`replay-server.replay.publish.batch-size` 已作为服务层批次大小生效：
+
+- `ReplayScheduler` 对连续回放窗口中的已归并帧按批发布，批次之间检查会话是否仍为 `RUNNING`。
+- `ReplayJumpService` 对跳转事件补偿帧和周期快照帧按批发布，批次之间检查会话是否仍处于可跳转状态。
+- 发送端口仍保持单帧同步发送，不引入 RocketMQ 批量发送 API；发布异常仍遵守“不成功则不推进水位”。
+
 ## 12. 配置设计
 
 ### 12.1 `replay-server` 配置示例

@@ -54,3 +54,18 @@
 当前交付物已经覆盖回放系统主骨架：独立 `replay-server`、不消费 `situation-{instanceId}`、创建后订阅 `broadcast-{instanceId}`、停止时取消实例广播订阅、TDengine 查询、协议重组、连续调度、跳转和基础指标均有实现与常规测试。
 
 但从上线审阅角度看，仍不应直接判定为“设计完全一致”。核心风险集中在并发一致性、跳转失败状态、事件表生产配置、终态停止清理和真实环境验证证据。建议先修复 P1 和 P2 中影响业务语义的项，再补真实全入口验证与日志/配置回归测试。
+
+## 修复闭环
+
+- Finding 1：已在 Phase 00 修复 `ReplaySession` 初始水位，首次连续回放窗口覆盖 `simulationStartTime`。
+- Finding 2：已在 Phase 01 修复连续调度与跳转互斥，`ReplayScheduler.tick()` 与 `ReplayJumpService.jump()` 对同一会话串行。
+- Finding 3：已在 Phase 01 修复跳转发布失败语义，发布失败进入 `FAILED` 且不恢复调度。
+- Finding 4：已在 Phase 02 补齐生产事件消息配置，事件表分类不再依赖空默认配置。
+- Finding 5：已在 Phase 00 修复终态停止清理，`COMPLETED/FAILED` 会话可由 stop 命令释放。
+- Finding 6：已在 Phase 00 修复 `COMPLETED` 跳转语义，自然完成后仍可跳转查看。
+- Finding 7：已在 Phase 02 修复 `time_control_{instanceId}` 缺表降级，历史数据可回退到态势表 `MIN/MAX(simtime)`。
+- Finding 8：已在 Phase 03 补强真实 `broadcast-global` 入口验证，真实环境测试不再绕过生产监听入口。
+- Finding 9：已在 Phase 03 补强真实回放内容验证，覆盖顺序、协议字段和 tag 映射。
+- Finding 10：已在 Phase 05 修复 `replay.publish.batch-size` 无效配置，连续回放与跳转发布均按配置分批并在批间检查状态。
+- 交付审阅验证缺口：已在 Phase 04 补 Spring 容器级 Mock 集成测试、结构化日志字段断言和 clean surefire dump 处置。
+- 最终验证：Phase 05 已通过阶段定向测试、`mvn -pl replay-server -am test`、`mvn test` 和显式真实环境 `ReplayRealEnvironmentTest`。

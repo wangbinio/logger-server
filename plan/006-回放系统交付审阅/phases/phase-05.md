@@ -1,5 +1,7 @@
 # Phase 05 批量发布与交付收尾
 
+当前状态：已完成
+
 ## 1. 阶段目标
 
 处理交付审阅的 P3 配置语义问题，并完成修复交付闭环：
@@ -52,3 +54,27 @@
 ## 6. 当前无需澄清的问题
 
 本阶段默认选择“让 batch-size 生效”。如果执行阶段决定删除该配置而非实现分批发布，需要先回写设计文档并在 Review 中说明取舍。
+
+## 7. Review
+
+### 7.1 实际改动
+
+- 保留 `replay-server.replay.publish.batch-size` 配置，并将其接入 `ReplayScheduler` 与 `ReplayJumpService` 的 Spring 构造路径。
+- `ReplayScheduler` 连续回放发布改为按 `batch-size` 分批处理已归并帧列表；同一批次内保持帧顺序，批次之间检查 `RUNNING` 状态。若批次后会话已暂停或停止，仅推进到最后已成功发布帧的 `simtime`，不把窗口水位伪推进到 `toInclusive`。
+- `ReplayJumpService` 跳转事件补偿和周期快照发布改为按 `batch-size` 分批处理；批次之间检查会话是否仍处于可跳转状态。若停止或失败发生在批次边界，立即终止后续发布，不执行最终时钟跳转、水位同步和成功跳转指标。
+- 新增连续调度分批测试与跳转分批停止测试，证明 `batch-size` 不再是无效配置，并保持发布顺序与失败不推进水位语义。
+- 在 `005-final.md` 中补充 Phase 05 落地说明，在 `todo-31` 中补充 Finding 1 至 Finding 10 的修复闭环。
+
+### 7.2 验证结果
+
+- TDD 失败证据：补测试后首次运行 `mvn -pl replay-server -am "-Dtest=ReplaySchedulerTest,ReplayJumpServiceTest" -DfailIfNoTests=false test` 失败于缺少 batch-size 构造路径。
+- `mvn -pl replay-server -am "-Dtest=ReplaySchedulerTest,ReplayJumpServiceTest" -DfailIfNoTests=false test`：通过，`Tests run: 15, Failures: 0, Errors: 0, Skipped: 0`。
+- `mvn -pl replay-server -am "-Dtest=ReplaySchedulerTest,ReplayJumpServiceTest,ReplayServerPropertiesTest,ReplayFlowIntegrationTest,ReplaySpringFlowIntegrationTest" -DfailIfNoTests=false test`：通过，`Tests run: 23, Failures: 0, Errors: 0, Skipped: 0`。
+- `mvn -pl replay-server -am test`：通过，`Tests run: 114, Failures: 0, Errors: 0, Skipped: 1`；跳过项为默认关闭的真实环境测试。
+- `mvn test`：通过，根反应堆 `common`、`logger-server`、`replay-server` 均为 `BUILD SUCCESS`；默认真实环境测试保持跳过策略。
+- `mvn -pl replay-server -am "-Dtest=ReplayRealEnvironmentTest" "-Dreplay.real-env.test=true" -DfailIfNoTests=false test`：通过，`Tests run: 1, Failures: 0, Errors: 0, Skipped: 0`；真实 RocketMQ/TDengine 链路完成 create、jump、stop。
+- surefire dump 检查：`common/target/surefire-reports`、`logger-server/target/surefire-reports`、`replay-server/target/surefire-reports` 中未发现 `.dump` 或 `.dumpstream`。
+
+### 7.3 遗留风险
+
+- 第一版仍未改用 RocketMQ 批量发送 API，`batch-size` 当前语义是服务层发布批次大小和批间状态检查粒度；这与本阶段方案一致，发送端口保持单帧同步发送。
