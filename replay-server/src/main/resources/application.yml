@@ -1,0 +1,35 @@
+spring:
+  application:
+    name: replay-server
+  profiles:
+    active: dev
+
+logging:
+  level:
+    root: INFO
+    com.szzh.replayserver: INFO
+
+replay-server:
+  protocol:
+    max-payload-size: 102400
+    messages:
+      global:
+        message-type: 1
+        create-message-code: 0
+        stop-message-code: 1
+      control:
+        message-type: 1200
+        start-message-code: 1
+        pause-message-code: 2
+        resume-message-code: 3
+        rate-message-code: 4
+        jump-message-code: 5
+        metadata-message-code: 9
+  replay:
+    query:
+      page-size: 1000
+    scheduler:
+      tick-millis: 50
+    publish:
+      batch-size: 500
+      retry-times: 3

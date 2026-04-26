@@ -10,7 +10,7 @@
 
 | 阶段 | 名称 | 目标摘要 | 依赖 | 当前状态 | 详细计划 |
 | ---- | ---- | ---- | ---- | ---- | ---- |
-| Phase 00 | 多模块拆分与 common 基线 | 将当前工程调整为 `common`、`logger-server`、`replay-server` 三模块结构，并保证记录系统测试不回退 | 无 | 未开始 | [phase-00.md](E:\project\5y\logger-server\plan\005-回放系统设计\phases\phase-00.md) |
+| Phase 00 | 多模块拆分与 common 基线 | 将当前工程调整为 `common`、`logger-server`、`replay-server` 三模块结构，并保证记录系统测试不回退 | 无 | 已完成 | [phase-00.md](E:\project\5y\logger-server\plan\005-回放系统设计\phases\phase-00.md) |
 | Phase 01 | replay-server 配置与消息入口 | 建立回放服务启动骨架、配置模型、全局监听器和实例级控制消息处理器 | Phase 00 | 未开始 | [phase-01.md](E:\project\5y\logger-server\plan\005-回放系统设计\phases\phase-01.md) |
 | Phase 02 | TDengine 查询与表分类 | 实现控制时间点查询、态势子表元数据发现、事件表与周期表分类、帧数据分页查询 | Phase 00, Phase 01 | 未开始 | [phase-02.md](E:\project\5y\logger-server\plan\005-回放系统设计\phases\phase-02.md) |
 | Phase 03 | 回放领域模型 | 实现 `ReplayClock`、`ReplaySession`、状态机和会话管理器 | Phase 00, Phase 01 | 未开始 | [phase-03.md](E:\project\5y\logger-server\plan\005-回放系统设计\phases\phase-03.md) |
@@ -48,6 +48,13 @@ Phase 00 多模块拆分与 common 基线
 - 涉及函数声明时必须补充中文注释，复杂实现逻辑在函数内部补充必要中文注释。
 - 每个阶段完成后，在对应阶段文档末尾补充 Review，记录实际改动、测试结果和遗留风险。
 
-## 6. 当前无需澄清的问题
+## 6. 当前状态说明
+
+- Phase 00 已完成：工程已改造为 Maven 多模块结构，根工程为父工程，新增 `common`、`logger-server`、`replay-server` 三个子模块。
+- `common` 已承载协议、JSON、Topic、通用异常和 TDengine 命名规则。
+- `logger-server` 已迁入子模块并依赖 `common`，记录服务现有测试通过。
+- `replay-server` 已建立空 Spring Boot 应用、基础配置和上下文加载测试。
+
+## 7. 当前无需澄清的问题
 
 本轮阶段拆解所需信息已经足够，当前没有阻塞性疑问。

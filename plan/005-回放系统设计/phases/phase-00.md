@@ -54,11 +54,34 @@ replay-server
 ## 5. 验证要求
 
 - `mvn -pl common test` 通过。
-- `mvn -pl logger-server test` 通过。
-- `mvn -pl replay-server test` 通过。
+- `mvn -pl logger-server -am test` 通过。
+- `mvn -pl replay-server -am test` 通过。
 - `mvn test` 至少能完成不依赖真实 RocketMQ 和 TDengine 的测试。
 - 记录系统原有配置、消息类型和测试语义不因模块拆分改变。
 
-## 6. 当前无需澄清的问题
+## 6. Review
+
+### 6.1 实际改动
+
+- 根 `pom.xml` 已改为 Maven 父工程，模块包括 `common`、`logger-server`、`replay-server`。
+- 当前记录系统源码、资源和测试已迁入 `logger-server` 子模块。
+- 新增 `common` 模块，迁入 `ProtocolData`、`ProtocolMessageUtil`、`JsonUtil`、`TopicConstants`、`BusinessException`、`ProtocolParseException`，并新增 `TdengineNaming`。
+- `logger-server` 已改为依赖 `common` 中的协议、异常、JSON、Topic 和 TDengine 命名能力。
+- 新增 `replay-server` 空 Spring Boot 应用、基础配置和上下文加载测试。
+
+### 6.2 验证结果
+
+- `mvn -pl common test` 通过，12 个测试通过。
+- `mvn -pl replay-server -am test` 通过，`common` 12 个测试通过，`replay-server` 1 个测试通过。
+- `mvn -pl logger-server -am test` 通过，`common` 12 个测试通过，`logger-server` 59 个测试运行，0 失败，0 错误，1 个真实环境测试按设计跳过。
+- `mvn test` 通过，完整 reactor `logger-platform`、`common`、`logger-server`、`replay-server` 全部成功。
+
+### 6.3 遗留风险
+
+- 当前 Phase 00 只创建 `replay-server` 空应用，不包含回放业务 Bean。
+- `replay-server` 暂时排除了 DataSource 自动配置，后续 Phase 02 实现 TDengine 配置时需要移除或调整。
+- 直接执行单模块命令时，依赖 sibling 模块的命令需要带 `-am`，例如 `mvn -pl replay-server -am test`。
+
+## 7. 当前无需澄清的问题
 
 本阶段没有阻塞性疑问。
