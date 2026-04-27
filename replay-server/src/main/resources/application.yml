@@ -13,19 +13,33 @@ replay-server:
   protocol:
     max-payload-size: 102400
     messages:
+      # broadcast-global 回放任务管理消息
       global:
+        # 类型编号
         message-type: 1
+        # 任务创建
         create-message-code: 0
+        # 任务停止
         stop-message-code: 1
+
+      # broadcast-{ScenarioInstanceID} 回放控制指令
       control:
+        # 类型编号
         message-type: 1200
+        # 回放启动控制指令
         start-message-code: 1
+        # 回放暂停控制指令
         pause-message-code: 2
+        # 回放继续控制指令
         resume-message-code: 3
+        # 回放倍速控制指令
         rate-message-code: 4
+        # 回放时间跳转控制指令
         jump-message-code: 5
+        # 回放任务开始时，往broadcast-{ScenarioInstanceID} 发送回放开始时间、结束时间和持续时间
         metadata-message-code: 9
   replay:
+    # 回放数据中的业务事件分类（时间跳转后需要全部加载的时间）
     event-messages:
       - message-type: 1001
         message-codes: [1, 2, 3]

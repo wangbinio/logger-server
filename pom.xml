@@ -15,7 +15,7 @@
 
     <groupId>com.szzh</groupId>
     <artifactId>logger-platform</artifactId>
-    <version>0.1.0</version>
+    <version>0.2.0</version>
     <name>logger-platform</name>
     <description>Logger and replay services parent project</description>
     <packaging>pom</packaging>
