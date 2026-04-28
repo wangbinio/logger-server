@@ -22,7 +22,7 @@ replay-server:
         # 任务停止
         stop-message-code: 1
 
-      # broadcast-{ScenarioInstanceID} 回放控制指令
+      # HTTP 外部接口复用的回放控制指令语义
       control:
         # 类型编号
         message-type: 1200
@@ -36,7 +36,7 @@ replay-server:
         rate-message-code: 4
         # 回放时间跳转控制指令
         jump-message-code: 5
-        # 回放任务开始时，往broadcast-{ScenarioInstanceID} 发送回放开始时间、结束时间和持续时间
+        # 历史回放元信息通知消息码，HTTP 元信息查询替代后不再主动发布
         metadata-message-code: 9
   replay:
     # 回放数据中的业务事件分类（时间跳转后需要全部加载的时间）

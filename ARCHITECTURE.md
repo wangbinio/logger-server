@@ -12,7 +12,7 @@
 | --- | --- | --- |
 | `common` | 公共库 | 承载平台协议解析、JSON、Topic 命名、TDengine 命名、通用异常。 |
 | `logger-server` | Spring Boot 服务 | 从 RocketMQ 消费仿真控制与态势消息，维护仿真会话和仿真时间，并写入 TDengine。 |
-| `replay-server` | Spring Boot 服务 | 从 TDengine 查询已记录数据，按回放控制命令重新发布态势到 RocketMQ。 |
+| `replay-server` | Spring Boot 服务 | 从 TDengine 查询已记录数据，通过 HTTP 回放控制命令重新发布态势到 RocketMQ。 |
 
 两个生产服务共享 `common`，但各自拥有独立的配置、状态机、消息入口、TDengine 访问逻辑和指标对象。
 
@@ -32,6 +32,7 @@
 ```mermaid
 flowchart LR
     Producer["仿真系统 / 控制端"]
+    HttpClient["前端 / HTTP 控制端"]
     RocketMQ["RocketMQ"]
     GlobalTopic["broadcast-global"]
     InstanceTopic["broadcast-{instanceId}"]
@@ -46,6 +47,7 @@ flowchart LR
     RocketMQ --> GlobalTopic
     RocketMQ --> InstanceTopic
     RocketMQ --> SituationTopic
+    HttpClient --> ReplayServer
 
     Common --> LoggerServer
     Common --> ReplayServer
@@ -56,7 +58,6 @@ flowchart LR
     LoggerServer --> TDengine
 
     GlobalTopic --> ReplayServer
-    InstanceTopic --> ReplayServer
     TDengine --> ReplayServer
     ReplayServer --> SituationTopic
     SituationTopic --> Consumer
@@ -67,7 +68,7 @@ flowchart LR
 - `logger-server` 是记录入口，消费原始态势并写入 TDengine。
 - `replay-server` 是回放入口，只向 `situation-{instanceId}` 发布回放态势，不订阅该态势 Topic。
 - 两个服务都固定订阅 `broadcast-global`，通过 `messageType` 区分记录任务与回放任务。
-- 两个服务都会按实例动态订阅 `broadcast-{instanceId}`，但记录侧和回放侧的控制 `messageType` 不同。
+- 只有 `logger-server` 按实例动态订阅 `broadcast-{instanceId}`；`replay-server` 的实例级回放控制改由 HTTP REST 接口进入。
 - TDengine 是记录与回放之间的持久化边界，服务间不直接调用。
 
 ## 4. Topic 与协议隔离
@@ -77,7 +78,7 @@ flowchart LR
 | Topic | 记录侧用途 | 回放侧用途 |
 | --- | --- | --- |
 | `broadcast-global` | 接收仿真实例创建与停止消息。 | 接收回放实例创建与停止消息。 |
-| `broadcast-{instanceId}` | 接收指定仿真实例的启动、暂停、继续控制消息。 | 接收指定回放实例的启动、暂停、继续、倍速、跳转控制消息。 |
+| `broadcast-{instanceId}` | 接收指定仿真实例的启动、暂停、继续控制消息。 | 不再作为生产控制入口，回放控制改由 HTTP 接口接收。 |
 | `situation-{instanceId}` | 接收指定仿真实例的原始态势消息。 | 发布指定实例的回放态势消息。 |
 
 Topic 名称由 `common` 模块的 `TopicConstants` 统一构造，`instanceId` 会先做非空校验和前后空白清理。
@@ -138,7 +139,7 @@ replay-server:
         metadata-message-code: 9
 ```
 
-`broadcast-global` 同时承载记录任务和回放任务，必须依赖 `messageType` 隔离。`broadcast-{instanceId}` 同时承载记录控制和回放控制，也必须依赖实例级 `messageType` 隔离。
+`broadcast-global` 同时承载记录任务和回放任务，必须依赖 `messageType` 隔离。`broadcast-{instanceId}` 只作为记录侧实例控制入口；回放侧 HTTP 控制层仍复用 `messageType=1200` 与 `messageCode=1/2/3/4/5` 作为内部语义，便于复用 `ReplayControlService` 和保持结构化日志连续。
 
 ## 5. common 模块
 
@@ -250,13 +251,15 @@ flowchart LR
 | 包 | 职责 |
 | --- | --- |
 | `config` | 回放配置绑定、RocketMQ 消费者工厂、生产者配置、TDengine 数据源。 |
+| `controller` | 回放 HTTP 控制接口和元信息查询接口。 |
 | `domain.clock` | 回放时钟，支持开始、暂停、继续、倍速、跳转。 |
 | `domain.session` | 回放会话、状态机、回放水位和子表分类结果。 |
+| `model.api` | HTTP 统一响应、会话快照、控制请求和控制结果。 |
 | `model.dto` | 回放创建、元信息、倍速、跳转载荷。 |
 | `model.query` | 查询游标、回放帧、表描述、表类型、时间范围。 |
-| `mq` | 回放全局监听、实例控制处理、动态订阅、态势发布。 |
+| `mq` | 回放全局监听、保留的旧实例控制适配、保留的动态订阅组件、态势发布。 |
 | `repository` | TDengine 时间范围、子表发现、帧查询。 |
-| `service` | 回放生命周期、控制、调度、跳转、元信息、表分类、帧归并。 |
+| `service` | 回放生命周期、HTTP 命令适配、控制、调度、跳转、历史元信息服务、表分类、帧归并。 |
 | `support.constant` | 回放侧消息常量。 |
 | `support.metric` | 内存级回放侧指标。 |
 
@@ -265,14 +268,14 @@ flowchart LR
 ```mermaid
 flowchart LR
     GlobalTopic["broadcast-global"]
-    ControlTopic["broadcast-{instanceId}"]
+    HttpClient["前端 / HTTP 控制端"]
     SituationTopic["situation-{instanceId}"]
     GlobalListener["ReplayGlobalBroadcastListener"]
-    TopicManager["ReplayTopicSubscriptionManager"]
-    ControlHandler["ReplayInstanceBroadcastMessageHandler"]
+    HttpController["ReplayControlController"]
     LifecycleService["ReplayLifecycleService"]
     ControlService["ReplayControlService"]
-    MetadataService["ReplayMetadataService"]
+    CommandFactory["ReplayHttpCommandFactory"]
+    SessionManager["ReplaySessionManager"]
     Scheduler["ReplayScheduler"]
     JumpService["ReplayJumpService"]
     TableDiscovery["ReplayTableDiscoveryRepository"]
@@ -284,9 +287,11 @@ flowchart LR
     GlobalTopic --> GlobalListener --> LifecycleService
     LifecycleService --> TimeControl --> TDengine
     LifecycleService --> TableDiscovery --> TDengine
-    LifecycleService --> TopicManager --> ControlTopic
-    LifecycleService --> MetadataService --> Publisher
-    ControlTopic --> ControlHandler --> ControlService
+    LifecycleService --> SessionManager
+    HttpClient --> HttpController
+    HttpController --> CommandFactory
+    HttpController --> SessionManager
+    HttpController --> ControlService
     ControlService --> Scheduler
     ControlService --> JumpService
     Scheduler --> FrameRepository --> TDengine
@@ -303,15 +308,15 @@ flowchart LR
 4. `ReplayTableDiscoveryRepository` 基于 `situation_{instanceId}` 发现子表。
 5. `ReplayTableClassifier` 按 `replay.event-messages` 区分事件表和周期表。
 6. `ReplaySessionManager` 创建 `ReplaySession`，初始化时钟、水位、表分类和状态。
-7. `ReplayTopicSubscriptionManager` 动态订阅 `broadcast-{instanceId}`。
-8. `ReplayMetadataService` 发布回放元信息。
-9. 会话进入 `READY` 状态。
+7. 会话进入 `READY` 状态。
+8. 不再动态订阅 `broadcast-{instanceId}`。
+9. 不再通过 RocketMQ 主动发布回放元信息，前端改为调用 `GET /api/replay/instances/{instanceId}` 查询。
 
-未发现可回放态势子表时，创建失败并抛出业务异常。创建失败会清理已建立的动态订阅并标记会话失败。
+未发现可回放态势子表时，创建失败并抛出业务异常。由于回放创建链路不再建立实例级控制订阅，失败时不需要回滚 `broadcast-{instanceId}` 订阅。
 
 ### 7.4 回放控制
 
-实例级回放控制消息由 `ReplayInstanceBroadcastMessageHandler` 分发到 `ReplayControlService`。
+实例级回放控制由 `ReplayControlController` 接收 HTTP 请求，再通过 `ReplayHttpCommandFactory` 构造内部 `ProtocolData` 并分发到 `ReplayControlService`。Controller 不直接操作回放状态机。
 
 | 当前状态 | 消息 | 结果 |
 | --- | --- | --- |
@@ -320,9 +325,9 @@ flowchart LR
 | `PAUSED` | `resume` | 恢复回放时钟并重新注册连续调度。 |
 | `RUNNING` / `PAUSED` | `rate` | 更新回放倍率。 |
 | `READY` / `RUNNING` / `PAUSED` / `COMPLETED` | `jump` | 执行时间跳转和补偿发布。 |
-| 任意状态 | `stop` | 取消调度、取消动态订阅、停止并移除会话。 |
+| 任意状态 | `stop` | 由 `broadcast-global` 停止消息触发，取消调度、停止并移除会话。 |
 
-`metadata` 消息码属于回放侧保留消息码，实例控制入口收到后直接忽略，避免把回放服务自己发布的元信息误当成控制指令。
+`metadata=9` 消息码属于回放侧历史保留消息码。创建回放任务后不再主动发布元信息，前端通过 `GET /api/replay/instances/{instanceId}` 获取 `startTime`、`endTime`、`duration`、`state`、`rate`、`currentReplayTime` 和 `lastDispatchedSimTime`。
 
 ### 7.5 连续回放
 
@@ -455,6 +460,7 @@ CREATE TABLE IF NOT EXISTS time_control_{instanceId}
 | 回放侧查询失败 | 记录查询失败指标，相关会话进入失败或中断路径。 |
 | 回放侧发布失败 | 记录发布失败指标，连续调度不推进未成功发布后的水位。 |
 | 动态订阅启动失败 | 关闭已创建消费者句柄，清理会话句柄并抛出初始化异常。 |
+| 回放 HTTP 参数错误 | 返回 `400 BAD_REQUEST`，不进入回放状态机。 |
 
 `LoggerMetrics` 和 `ReplayMetrics` 当前均为内存级计数器，尚未接入外部指标系统。
 
@@ -475,7 +481,7 @@ CREATE TABLE IF NOT EXISTS time_control_{instanceId}
 - `ReplayJumpService` 在同一会话对象锁内执行跳转，避免与连续调度并发推进。
 - 连续回放只有发布成功后才推进 `lastDispatchedSimTime`。
 - 分批发布在批次边界检查状态，避免停止或失败后继续发布。
-- 停止回放会取消调度、取消动态订阅并移除会话。
+- 停止回放会取消调度、停止并移除本地会话，不再取消实例级回放控制订阅。
 
 ## 12. 测试策略
 
@@ -484,7 +490,7 @@ CREATE TABLE IF NOT EXISTS time_control_{instanceId}
 - `common` 协议、JSON、Topic、TDengine 命名单元测试。
 - `logger-server` 仿真时钟、会话状态、消息分发、TDengine SQL、生命周期、控制和态势记录测试。
 - `logger-server` Mock 主流程集成测试。
-- `replay-server` 回放时钟、会话状态、消息分发、TDengine 查询、表分类、连续调度、倍速、跳转和发布测试。
+- `replay-server` 回放时钟、会话状态、HTTP 控制接口、消息分发、TDengine 查询、表分类、连续调度、倍速、跳转和发布测试。
 - `replay-server` Mock 全链路集成测试。
 - Spring 容器级 Mock 集成测试。
 
@@ -516,8 +522,8 @@ mvn -pl replay-server -am "-Dtest=ReplayRealEnvironmentTest" "-Dreplay.real-env.
 - `common` 公共协议与命名模块。
 - `logger-server` 全局订阅、动态订阅、生命周期、控制、态势记录。
 - `logger-server` 控制时间点表创建和 `start`、`pause`、`resume`、`stop` 写入。
-- `replay-server` 全局订阅、动态控制订阅、TDengine 元数据读取、表分类。
-- `replay-server` 连续回放、暂停继续、倍速控制、时间跳转、元信息发布。
+- `replay-server` 全局订阅、HTTP 控制接口、HTTP 元信息查询、TDengine 元数据读取、表分类。
+- `replay-server` 连续回放、暂停继续、倍速控制、时间跳转、批次发布。
 - `replay-server.replay.publish.batch-size` 服务层分批发布。
 - 记录侧与回放侧实例控制配置均使用 `protocol.messages.control` 节点。
 - 默认自动化测试和显式真实环境测试入口。
@@ -525,7 +531,7 @@ mvn -pl replay-server -am "-Dtest=ReplayRealEnvironmentTest" "-Dreplay.real-env.
 
 暂未包含：
 
-- HTTP 管理接口。
+- 创建和停止回放任务的 HTTP 管理接口。
 - 外部可观测性系统集成。
 - 记录侧动态倍率控制入口。
 - 消息幂等写入去重。

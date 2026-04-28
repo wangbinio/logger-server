@@ -12,7 +12,6 @@ import com.szzh.replayserver.domain.session.ReplaySession;
 import com.szzh.replayserver.domain.session.ReplaySessionManager;
 import com.szzh.replayserver.domain.session.ReplaySessionState;
 import com.szzh.replayserver.mq.ReplayGlobalBroadcastListener;
-import com.szzh.replayserver.mq.ReplayTopicSubscriptionManager;
 import com.szzh.replayserver.support.constant.ReplayMessageConstants;
 import com.szzh.replayserver.support.metric.ReplayMetrics;
 import org.apache.rocketmq.client.AccessChannel;
@@ -30,9 +29,12 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.http.MediaType;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.util.StringUtils;
 
 import java.nio.charset.StandardCharsets;
@@ -50,12 +52,16 @@ import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BooleanSupplier;
 
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+
 /**
  * 回放真实环境集成测试。
  */
 @SpringBootTest(classes = ReplayServerApplication.class)
 @ActiveProfiles({"dev", "real"})
 @EnabledIfSystemProperty(named = "replay.real-env.test", matches = "true")
+@AutoConfigureMockMvc
 class ReplayRealEnvironmentTest {
 
     private static final long START_SIM_TIME = 1_000L;
@@ -88,7 +94,7 @@ class ReplayRealEnvironmentTest {
     private ReplaySessionManager sessionManager;
 
     @Autowired
-    private ReplayTopicSubscriptionManager subscriptionManager;
+    private MockMvc mockMvc;
 
     @Autowired
     private ReplayMetrics replayMetrics;
@@ -104,7 +110,6 @@ class ReplayRealEnvironmentTest {
     @Test
     void shouldReplayRecordedTdengineDataAgainstRealRocketMqAndTdengine() throws Exception {
         String instanceId = "replay-real-it-" + System.currentTimeMillis();
-        String broadcastTopic = TopicConstants.buildInstanceBroadcastTopic(instanceId);
         String situationTopic = TopicConstants.buildInstanceSituationTopic(instanceId);
         List<ProtocolData> receivedFrames = Collections.synchronizedList(new ArrayList<ProtocolData>());
         assertRealProfileConfiguration();
@@ -115,7 +120,6 @@ class ReplayRealEnvironmentTest {
         try {
             producer = createProducer();
             ensureTopicExists(producer, TopicConstants.GLOBAL_BROADCAST_TOPIC);
-            ensureTopicExists(producer, broadcastTopic);
             ensureTopicExists(producer, situationTopic);
             situationConsumer = createSituationConsumer(instanceId, receivedFrames);
             TimeUnit.SECONDS.sleep(2);
@@ -134,20 +138,8 @@ class ReplayRealEnvironmentTest {
                             .orElse(false);
                 }
             });
-            waitUntil("实例控制 topic 完成动态订阅", 30, new BooleanSupplier() {
-                /**
-                 * 判断实例控制 topic 是否已订阅。
-                 *
-                 * @return 是否已订阅。
-                 */
-                @Override
-                public boolean getAsBoolean() {
-                    return subscriptionManager.isSubscribed(instanceId);
-                }
-            });
 
-            sendControl(producer, instanceId, messageConstants.getInstanceJumpMessageCode(),
-                    "{\"time\":" + JUMP_TARGET_SIM_TIME + "}");
+            postControl(instanceId, "jump", "{\"time\":" + JUMP_TARGET_SIM_TIME + "}");
             waitUntil("真实回放态势消息发布完成", 30, new BooleanSupplier() {
                 /**
                  * 判断态势消息是否发布完成。
@@ -194,7 +186,6 @@ class ReplayRealEnvironmentTest {
                     return !sessionManager.getSession(instanceId).isPresent();
                 }
             });
-            Assertions.assertFalse(subscriptionManager.isSubscribed(instanceId), "全局 stop 后实例订阅未释放");
         } finally {
             stopByGlobalMessageQuietly(producer, instanceId);
             shutdownQuietly(situationConsumer);
@@ -334,25 +325,18 @@ class ReplayRealEnvironmentTest {
     }
 
     /**
-     * 发送实例控制消息。
+     * 通过 HTTP 接口发送回放控制请求。
      *
-     * @param producer RocketMQ 生产者。
      * @param instanceId 实例 ID。
-     * @param messageCode 消息编号。
-     * @param rawJson JSON 载荷。
-     * @throws Exception 消息发送异常。
+     * @param action 控制动作。
+     * @param rawJson JSON 请求体。
+     * @throws Exception MockMvc 调用异常。
      */
-    private void sendControl(DefaultMQProducer producer,
-                             String instanceId,
-                             int messageCode,
-                             String rawJson) throws Exception {
-        producer.send(new Message(
-                TopicConstants.buildInstanceBroadcastTopic(instanceId),
-                ProtocolMessageUtil.buildData(
-                        0,
-                        (short) messageConstants.getInstanceControlMessageType(),
-                        messageCode,
-                        rawJson.getBytes(StandardCharsets.UTF_8))));
+    private void postControl(String instanceId, String action, String rawJson) throws Exception {
+        mockMvc.perform(post("/api/replay/instances/" + instanceId + "/" + action)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(rawJson))
+                .andExpect(status().isOk());
     }
 
     /**

@@ -2,7 +2,6 @@ package com.szzh.replayserver.service;
 
 import com.szzh.common.exception.BusinessException;
 import com.szzh.common.protocol.ProtocolData;
-import com.szzh.common.topic.TopicConstants;
 import com.szzh.replayserver.domain.session.ReplaySession;
 import com.szzh.replayserver.domain.session.ReplaySessionManager;
 import com.szzh.replayserver.model.dto.ReplayCreatePayload;
@@ -10,7 +9,6 @@ import com.szzh.replayserver.model.query.ReplayTableDescriptor;
 import com.szzh.replayserver.model.query.ReplayTableType;
 import com.szzh.replayserver.model.query.ReplayTimeRange;
 import com.szzh.replayserver.mq.ReplayLifecycleCommandPort;
-import com.szzh.replayserver.mq.ReplayTopicSubscriptionManager;
 import com.szzh.replayserver.repository.ReplayTableDiscoveryRepository;
 import com.szzh.replayserver.repository.ReplayTimeControlRepository;
 import org.slf4j.Logger;
@@ -37,10 +35,6 @@ public class ReplayLifecycleService implements ReplayLifecycleCommandPort {
 
     private final ReplayTableClassifier tableClassifier;
 
-    private final ReplayTopicSubscriptionManager subscriptionManager;
-
-    private final ReplayMetadataService metadataService;
-
     private final ReplayScheduler scheduler;
 
     /**
@@ -50,23 +44,17 @@ public class ReplayLifecycleService implements ReplayLifecycleCommandPort {
      * @param timeControlRepository 控制时间点 Repository。
      * @param tableDiscoveryRepository 子表发现 Repository。
      * @param tableClassifier 子表分类器。
-     * @param subscriptionManager 动态订阅管理器。
-     * @param metadataService 元信息服务。
      * @param scheduler 回放调度器。
      */
     public ReplayLifecycleService(ReplaySessionManager sessionManager,
                                   ReplayTimeControlRepository timeControlRepository,
                                   ReplayTableDiscoveryRepository tableDiscoveryRepository,
                                   ReplayTableClassifier tableClassifier,
-                                  ReplayTopicSubscriptionManager subscriptionManager,
-                                  ReplayMetadataService metadataService,
                                   ReplayScheduler scheduler) {
         this.sessionManager = Objects.requireNonNull(sessionManager, "sessionManager 不能为空");
         this.timeControlRepository = Objects.requireNonNull(timeControlRepository, "timeControlRepository 不能为空");
         this.tableDiscoveryRepository = Objects.requireNonNull(tableDiscoveryRepository, "tableDiscoveryRepository 不能为空");
         this.tableClassifier = Objects.requireNonNull(tableClassifier, "tableClassifier 不能为空");
-        this.subscriptionManager = Objects.requireNonNull(subscriptionManager, "subscriptionManager 不能为空");
-        this.metadataService = Objects.requireNonNull(metadataService, "metadataService 不能为空");
         this.scheduler = Objects.requireNonNull(scheduler, "scheduler 不能为空");
     }
 
@@ -115,26 +103,11 @@ public class ReplayLifecycleService implements ReplayLifecycleCommandPort {
                 timeRange,
                 filterTables(classifiedTables, ReplayTableType.EVENT),
                 filterTables(classifiedTables, ReplayTableType.PERIODIC));
-        try {
-            // 建立实例级回放控制订阅。
-            subscriptionManager.subscribe(instanceId);
-            session.setBroadcastConsumerHandle(TopicConstants.buildInstanceBroadcastTopic(instanceId));
-            session.markReady();
+        session.markReady();
 
-            // 发布回放元信息通知。
-            metadataService.publishMetadata(session);
-
-            log.info("result=replay_create_success instanceId={} topic={} messageType=-1 messageCode=-1 senderId=-1 currentReplayTime={} lastDispatchedSimTime={} rate={} replayState={}",
-                    instanceId, TopicConstants.buildInstanceBroadcastTopic(instanceId), session.getReplayClock().currentTime(), session.getLastDispatchedSimTime(), session.getRate(), session.getState());
-            return session;
-        } catch (RuntimeException exception) {
-            subscriptionManager.unsubscribe(instanceId);
-            markFailedIfActive(session, exception);
-
-            log.warn("result=replay_create_failed instanceId={} topic={} messageType=-1 messageCode=-1 senderId=-1 currentReplayTime={} lastDispatchedSimTime={} rate={} replayState={} reason={}",
-                    instanceId, TopicConstants.buildInstanceBroadcastTopic(instanceId), session.getReplayClock().currentTime(), session.getLastDispatchedSimTime(), session.getRate(), session.getState(), exception.getMessage());
-            throw exception;
-        }
+        log.info("result=replay_create_success instanceId={} topic=- messageType=-1 messageCode=-1 senderId=-1 currentReplayTime={} lastDispatchedSimTime={} rate={} replayState={}",
+                instanceId, session.getReplayClock().currentTime(), session.getLastDispatchedSimTime(), session.getRate(), session.getState());
+        return session;
     }
 
     /**
@@ -145,15 +118,14 @@ public class ReplayLifecycleService implements ReplayLifecycleCommandPort {
     public void stopReplay(String instanceId) {
         ReplaySession session = sessionManager.getSession(instanceId).orElse(null);
 
-        // 停止连续回放调度并释放实例级控制订阅。
+        // 停止连续回放调度并释放本地会话，HTTP 控制入口不需要释放实例级订阅。
         scheduler.cancel(instanceId);
         sessionManager.stopSession(instanceId);
-        subscriptionManager.unsubscribe(instanceId);
         sessionManager.removeSession(instanceId);
 
         if (session != null) {
-            log.info("result=replay_stop_success instanceId={} topic={} messageType=-1 messageCode=-1 senderId=-1 currentReplayTime={} lastDispatchedSimTime={} rate={} replayState={}",
-                    instanceId, TopicConstants.buildInstanceBroadcastTopic(instanceId), session.getReplayClock().currentTime(), session.getLastDispatchedSimTime(), session.getRate(), session.getState());
+            log.info("result=replay_stop_success instanceId={} topic=- messageType=-1 messageCode=-1 senderId=-1 currentReplayTime={} lastDispatchedSimTime={} rate={} replayState={}",
+                    instanceId, session.getReplayClock().currentTime(), session.getLastDispatchedSimTime(), session.getRate(), session.getState());
         }
     }
 
@@ -172,18 +144,6 @@ public class ReplayLifecycleService implements ReplayLifecycleCommandPort {
             }
         }
         return result;
-    }
-
-    /**
-     * 活动会话创建失败时标记失败。
-     *
-     * @param session 回放会话。
-     * @param exception 异常。
-     */
-    private void markFailedIfActive(ReplaySession session, RuntimeException exception) {
-        if (!session.getState().isTerminal()) {
-            session.markFailed(exception.getMessage());
-        }
     }
 
     /**

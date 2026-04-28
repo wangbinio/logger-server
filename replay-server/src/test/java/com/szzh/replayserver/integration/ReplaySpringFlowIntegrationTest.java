@@ -1,7 +1,6 @@
 package com.szzh.replayserver.integration;
 
 import com.szzh.common.exception.BusinessException;
-import com.szzh.common.protocol.ProtocolData;
 import com.szzh.common.protocol.ProtocolMessageUtil;
 import com.szzh.common.topic.TopicConstants;
 import com.szzh.replayserver.ReplayServerApplication;
@@ -18,7 +17,6 @@ import com.szzh.replayserver.mq.ReplayGlobalBroadcastListener;
 import com.szzh.replayserver.mq.ReplayInstanceBroadcastMessageHandler;
 import com.szzh.replayserver.mq.ReplayRocketMqSender;
 import com.szzh.replayserver.mq.ReplaySituationPublisher;
-import com.szzh.replayserver.mq.ReplayTopicSubscriptionManager;
 import com.szzh.replayserver.repository.ReplayFrameRepository;
 import com.szzh.replayserver.repository.ReplayTableDiscoveryRepository;
 import com.szzh.replayserver.repository.ReplayTimeControlRepository;
@@ -31,21 +29,26 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.ArgumentCaptor;
 import org.mockito.Mockito;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.boot.test.mock.mockito.SpyBean;
 import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
+import org.springframework.http.MediaType;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.web.servlet.MockMvc;
 
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
+
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
  * Spring 容器级回放 Mock 全链路与日志集成测试。
@@ -55,6 +58,7 @@ import java.util.concurrent.TimeUnit;
         properties = "replay-server.rocketmq.enable-global-listener=true")
 @ActiveProfiles("test")
 @ExtendWith(OutputCaptureExtension.class)
+@AutoConfigureMockMvc
 class ReplaySpringFlowIntegrationTest {
 
     private static final String INSTANCE_ID = "instance-001";
@@ -74,6 +78,9 @@ class ReplaySpringFlowIntegrationTest {
 
     @Autowired
     private ReplayInstanceBroadcastMessageHandler instanceHandler;
+
+    @Autowired
+    private MockMvc mockMvc;
 
     @Autowired
     private ReplaySessionManager sessionManager;
@@ -100,9 +107,6 @@ class ReplaySpringFlowIntegrationTest {
     private ReplayFrameRepository frameRepository;
 
     @MockBean
-    private ReplayTopicSubscriptionManager subscriptionManager;
-
-    @MockBean
     private ReplayRocketMqSender rocketMqSender;
 
     /**
@@ -110,7 +114,6 @@ class ReplaySpringFlowIntegrationTest {
      */
     @BeforeEach
     void setUp() {
-        Mockito.when(subscriptionManager.subscribe(INSTANCE_ID)).thenReturn(true);
         Mockito.when(timeControlRepository.resolveTimeRange(INSTANCE_ID))
                 .thenReturn(new ReplayTimeRange(1_000L, 2_000L));
         Mockito.when(tableDiscoveryRepository.discoverTables(INSTANCE_ID))
@@ -133,9 +136,10 @@ class ReplaySpringFlowIntegrationTest {
      * 验证 Spring 容器真实装配的全链路消息流和成功路径结构化日志。
      *
      * @param output 捕获的日志输出。
+     * @throws Exception MockMvc 调用异常。
      */
     @Test
-    void shouldRunSpringMockReplayFlowAndEmitStructuredSuccessLogs(CapturedOutput output) {
+    void shouldRunSpringMockReplayFlowAndEmitStructuredSuccessLogs(CapturedOutput output) throws Exception {
         Mockito.doNothing().when(replayScheduler).schedule(Mockito.any(ReplaySession.class));
         Mockito.doNothing().when(replayScheduler).cancel(Mockito.anyString());
         Mockito.when(frameRepository.findForwardJumpEventFrames(Mockito.eq(eventTable),
@@ -148,29 +152,30 @@ class ReplaySpringFlowIntegrationTest {
 
         ReplaySession session = sessionManager.requireSession(INSTANCE_ID);
         Assertions.assertEquals(ReplaySessionState.READY, session.getState());
-        Mockito.verify(subscriptionManager).subscribe(INSTANCE_ID);
-        assertMetadataPublished();
+        Assertions.assertNull(session.getBroadcastConsumerHandle());
+        Mockito.verify(rocketMqSender, Mockito.never()).send(
+                Mockito.eq(TopicConstants.buildInstanceBroadcastTopic(INSTANCE_ID)),
+                Mockito.any(byte[].class));
 
-        instanceHandler.handle(INSTANCE_ID, controlMessage(messageConstants.getInstanceStartMessageCode(), "{}"));
+        postControl("/api/replay/instances/" + INSTANCE_ID + "/start", null);
         Assertions.assertEquals(ReplaySessionState.RUNNING, session.getState());
         Mockito.verify(replayScheduler).schedule(session);
 
-        instanceHandler.handle(INSTANCE_ID, controlMessage(messageConstants.getInstancePauseMessageCode(), "{}"));
+        postControl("/api/replay/instances/" + INSTANCE_ID + "/pause", null);
         Assertions.assertEquals(ReplaySessionState.PAUSED, session.getState());
 
-        instanceHandler.handle(INSTANCE_ID, controlMessage(messageConstants.getInstanceResumeMessageCode(), "{}"));
+        postControl("/api/replay/instances/" + INSTANCE_ID + "/resume", null);
         Assertions.assertEquals(ReplaySessionState.RUNNING, session.getState());
 
-        instanceHandler.handle(INSTANCE_ID, controlMessage(messageConstants.getInstanceRateMessageCode(), "{\"rate\":2.0}"));
+        postControl("/api/replay/instances/" + INSTANCE_ID + "/rate", "{\"rate\":2.0}");
         Assertions.assertEquals(2.0D, session.getRate(), 0.0001D);
 
-        instanceHandler.handle(INSTANCE_ID, controlMessage(messageConstants.getInstanceJumpMessageCode(), "{\"time\":1700}"));
+        postControl("/api/replay/instances/" + INSTANCE_ID + "/jump", "{\"time\":1700}");
         Assertions.assertEquals(1_700L, session.getLastDispatchedSimTime());
         Assertions.assertEquals(1L, replayMetrics.jumpCount());
 
         globalListener.onMessage(globalMessage(messageConstants.getGlobalStopMessageCode()));
         Assertions.assertFalse(sessionManager.getSession(INSTANCE_ID).isPresent());
-        Mockito.verify(subscriptionManager).unsubscribe(INSTANCE_ID);
 
         assertLifecycleSuccessLogs(output);
         assertControlSuccessLogs(output);
@@ -186,9 +191,6 @@ class ReplaySpringFlowIntegrationTest {
         globalListener.onMessage(invalidMessage(TopicConstants.GLOBAL_BROADCAST_TOPIC));
         instanceHandler.handle(INSTANCE_ID, invalidMessage(TopicConstants.buildInstanceBroadcastTopic(INSTANCE_ID)));
 
-        Mockito.doThrow(BusinessException.state("metadata boom"))
-                .when(rocketMqSender)
-                .send(Mockito.eq(TopicConstants.buildInstanceBroadcastTopic(INSTANCE_ID)), Mockito.any(byte[].class));
         globalListener.onMessage(globalMessage(messageConstants.getGlobalCreateMessageCode()));
 
         Mockito.doThrow(BusinessException.state("send boom"))
@@ -233,19 +235,6 @@ class ReplaySpringFlowIntegrationTest {
     }
 
     /**
-     * 断言元信息通过容器装配的发送端口发布。
-     */
-    private void assertMetadataPublished() {
-        ArgumentCaptor<byte[]> bodyCaptor = ArgumentCaptor.forClass(byte[].class);
-        Mockito.verify(rocketMqSender).send(
-                Mockito.eq(TopicConstants.buildInstanceBroadcastTopic(INSTANCE_ID)),
-                bodyCaptor.capture());
-        ProtocolData protocolData = ProtocolMessageUtil.parseData(bodyCaptor.getValue());
-        Assertions.assertEquals(messageConstants.getInstanceControlMessageType(), protocolData.getMessageType());
-        Assertions.assertEquals(messageConstants.getInstanceMetadataMessageCode(), protocolData.getMessageCode());
-    }
-
-    /**
      * 断言生命周期成功日志字段。
      *
      * @param output 捕获的日志输出。
@@ -255,7 +244,7 @@ class ReplaySpringFlowIntegrationTest {
         Assertions.assertTrue(logs.contains("result=replay_create_success"));
         Assertions.assertTrue(logs.contains("result=replay_stop_success"));
         Assertions.assertTrue(logs.contains("instanceId=" + INSTANCE_ID));
-        Assertions.assertTrue(logs.contains("topic=" + TopicConstants.buildInstanceBroadcastTopic(INSTANCE_ID)));
+        Assertions.assertTrue(logs.contains("topic=-"));
         Assertions.assertTrue(logs.contains("messageType=-1"));
         Assertions.assertTrue(logs.contains("messageCode=-1"));
         Assertions.assertTrue(logs.contains("senderId=-1"));
@@ -306,9 +295,6 @@ class ReplaySpringFlowIntegrationTest {
         Assertions.assertTrue(logs.contains("messageCode=-1"));
         Assertions.assertTrue(logs.contains("senderId=-1"));
         Assertions.assertTrue(logs.contains("reason=协议长度非法"));
-        Assertions.assertTrue(logs.contains("result=replay_create_failed"));
-        Assertions.assertTrue(logs.contains("reason=metadata boom"));
-        Assertions.assertTrue(logs.contains("result=replay_business_exception"));
         Assertions.assertTrue(logs.contains("result=replay_publish_retry_failed"));
         Assertions.assertTrue(logs.contains("topic=" + TopicConstants.buildInstanceSituationTopic(INSTANCE_ID)));
         Assertions.assertTrue(logs.contains("simtime=1600"));
@@ -335,6 +321,25 @@ class ReplaySpringFlowIntegrationTest {
     }
 
     /**
+     * 通过 HTTP 接口发送回放控制请求。
+     *
+     * @param path 请求路径。
+     * @param body 请求体。
+     * @throws Exception MockMvc 调用异常。
+     */
+    private void postControl(String path, String body) throws Exception {
+        if (body == null) {
+            mockMvc.perform(post(path))
+                    .andExpect(status().isOk());
+            return;
+        }
+        mockMvc.perform(post(path)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isOk());
+    }
+
+    /**
      * 构造全局生命周期消息。
      *
      * @param messageCode 消息编号。
@@ -344,18 +349,6 @@ class ReplaySpringFlowIntegrationTest {
         return message(TopicConstants.GLOBAL_BROADCAST_TOPIC,
                 protocolBody(0, messageConstants.getGlobalMessageType(), messageCode,
                         "{\"instanceId\":\"" + INSTANCE_ID + "\"}"));
-    }
-
-    /**
-     * 构造实例控制消息。
-     *
-     * @param messageCode 消息编号。
-     * @param rawJson JSON 载荷。
-     * @return RocketMQ 原始消息。
-     */
-    private MessageExt controlMessage(int messageCode, String rawJson) {
-        return message(TopicConstants.buildInstanceBroadcastTopic(INSTANCE_ID),
-                protocolBody(0, messageConstants.getInstanceControlMessageType(), messageCode, rawJson));
     }
 
     /**

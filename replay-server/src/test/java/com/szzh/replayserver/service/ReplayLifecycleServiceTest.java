@@ -8,7 +8,6 @@ import com.szzh.replayserver.domain.session.ReplaySessionState;
 import com.szzh.replayserver.model.query.ReplayTableDescriptor;
 import com.szzh.replayserver.model.query.ReplayTableType;
 import com.szzh.replayserver.model.query.ReplayTimeRange;
-import com.szzh.replayserver.mq.ReplayTopicSubscriptionManager;
 import com.szzh.replayserver.repository.ReplayTableDiscoveryRepository;
 import com.szzh.replayserver.repository.ReplayTimeControlRepository;
 import org.junit.jupiter.api.Assertions;
@@ -26,10 +25,10 @@ import java.util.concurrent.atomic.AtomicLong;
 class ReplayLifecycleServiceTest {
 
     /**
-     * 验证创建回放任务会查询元数据、创建会话、订阅控制 topic 并发布元信息。
+     * 验证创建回放任务会查询元数据并创建 READY 会话，但不再订阅控制 topic 或发布元信息。
      */
     @Test
-    void shouldCreateReplaySessionAndPublishMetadata() {
+    void shouldCreateReplaySessionWithoutControlSubscriptionOrMetadata() {
         Fixture fixture = new Fixture();
         fixture.stubCreateSuccess();
 
@@ -39,9 +38,7 @@ class ReplayLifecycleServiceTest {
         Assertions.assertEquals(ReplaySessionState.READY, session.getState());
         Assertions.assertEquals(1, session.getEventTables().size());
         Assertions.assertEquals(1, session.getPeriodicTables().size());
-        Assertions.assertNotNull(session.getBroadcastConsumerHandle());
-        Mockito.verify(fixture.subscriptionManager).subscribe("instance-001");
-        Mockito.verify(fixture.metadataService).publishMetadata(session);
+        Assertions.assertNull(session.getBroadcastConsumerHandle());
     }
 
     /**
@@ -56,31 +53,30 @@ class ReplayLifecycleServiceTest {
         fixture.service.handleCreate(protocolData("{\"instanceId\":\"instance-001\"}"));
 
         Mockito.verify(fixture.timeControlRepository, Mockito.times(1)).resolveTimeRange("instance-001");
-        Mockito.verify(fixture.metadataService, Mockito.times(1)).publishMetadata(Mockito.any(ReplaySession.class));
         Assertions.assertEquals(1, fixture.sessionManager.size());
     }
 
     /**
-     * 验证创建过程中元信息发布失败会清理订阅并标记失败。
+     * 验证创建过程中表发现失败会抛出异常且不保留会话。
      */
     @Test
-    void shouldCleanupSubscriptionAndMarkFailedWhenCreateFails() {
+    void shouldNotKeepSessionWhenCreateMetadataDiscoveryFails() {
         Fixture fixture = new Fixture();
-        fixture.stubCreateSuccess();
-        Mockito.doThrow(BusinessException.state("metadata boom"))
-                .when(fixture.metadataService)
-                .publishMetadata(Mockito.any(ReplaySession.class));
+        Mockito.when(fixture.timeControlRepository.resolveTimeRange("instance-001"))
+                .thenReturn(new ReplayTimeRange(1_000L, 2_000L));
+        Mockito.when(fixture.tableDiscoveryRepository.discoverTables("instance-001"))
+                .thenReturn(Collections.emptyList());
+        Mockito.when(fixture.tableClassifier.classify(Collections.emptyList()))
+                .thenReturn(Collections.emptyList());
 
         Assertions.assertThrows(BusinessException.class,
                 () -> fixture.service.handleCreate(protocolData("{\"instanceId\":\"instance-001\"}")));
 
-        ReplaySession session = fixture.sessionManager.requireSession("instance-001");
-        Assertions.assertEquals(ReplaySessionState.FAILED, session.getState());
-        Mockito.verify(fixture.subscriptionManager).unsubscribe("instance-001");
+        Assertions.assertFalse(fixture.sessionManager.getSession("instance-001").isPresent());
     }
 
     /**
-     * 验证停止任务会停止调度、取消控制订阅并移除会话。
+     * 验证停止任务会停止调度并移除会话。
      */
     @Test
     void shouldStopReplayAndReleaseResources() {
@@ -91,7 +87,6 @@ class ReplayLifecycleServiceTest {
         fixture.service.handleStop(protocolData("{\"instanceId\":\"instance-001\"}"));
 
         Mockito.verify(fixture.scheduler).cancel("instance-001");
-        Mockito.verify(fixture.subscriptionManager).unsubscribe("instance-001");
         Assertions.assertFalse(fixture.sessionManager.getSession("instance-001").isPresent());
     }
 
@@ -110,7 +105,6 @@ class ReplayLifecycleServiceTest {
         fixture.service.handleStop(protocolData("{\"instanceId\":\"instance-001\"}"));
 
         Mockito.verify(fixture.scheduler).cancel("instance-001");
-        Mockito.verify(fixture.subscriptionManager).unsubscribe("instance-001");
         Assertions.assertFalse(fixture.sessionManager.getSession("instance-001").isPresent());
     }
 
@@ -128,7 +122,6 @@ class ReplayLifecycleServiceTest {
         fixture.service.handleStop(protocolData("{\"instanceId\":\"instance-001\"}"));
 
         Mockito.verify(fixture.scheduler).cancel("instance-001");
-        Mockito.verify(fixture.subscriptionManager).unsubscribe("instance-001");
         Assertions.assertFalse(fixture.sessionManager.getSession("instance-001").isPresent());
     }
 
@@ -160,11 +153,6 @@ class ReplayLifecycleServiceTest {
 
         private final ReplayTableClassifier tableClassifier = Mockito.mock(ReplayTableClassifier.class);
 
-        private final ReplayTopicSubscriptionManager subscriptionManager =
-                Mockito.mock(ReplayTopicSubscriptionManager.class);
-
-        private final ReplayMetadataService metadataService = Mockito.mock(ReplayMetadataService.class);
-
         private final ReplayScheduler scheduler = Mockito.mock(ReplayScheduler.class);
 
         private final ReplayLifecycleService service = new ReplayLifecycleService(
@@ -172,8 +160,6 @@ class ReplayLifecycleServiceTest {
                 timeControlRepository,
                 tableDiscoveryRepository,
                 tableClassifier,
-                subscriptionManager,
-                metadataService,
                 scheduler);
 
         /**
@@ -190,7 +176,6 @@ class ReplayLifecycleServiceTest {
                     .thenReturn(Arrays.asList(eventTable.withType(ReplayTableType.PERIODIC), periodicTable));
             Mockito.when(tableClassifier.classify(Mockito.anyList()))
                     .thenReturn(Arrays.asList(eventTable, periodicTable));
-            Mockito.when(subscriptionManager.subscribe("instance-001")).thenReturn(true);
         }
     }
 }

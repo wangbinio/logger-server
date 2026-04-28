@@ -14,10 +14,8 @@ import com.szzh.replayserver.model.query.ReplayTableDescriptor;
 import com.szzh.replayserver.model.query.ReplayTableType;
 import com.szzh.replayserver.model.query.ReplayTimeRange;
 import com.szzh.replayserver.mq.ReplayGlobalBroadcastListener;
-import com.szzh.replayserver.mq.ReplayInstanceBroadcastMessageHandler;
 import com.szzh.replayserver.mq.ReplayRocketMqSender;
 import com.szzh.replayserver.mq.ReplaySituationPublisher;
-import com.szzh.replayserver.mq.ReplayTopicSubscriptionManager;
 import com.szzh.replayserver.repository.ReplayFrameRepository;
 import com.szzh.replayserver.repository.ReplayTableDiscoveryRepository;
 import com.szzh.replayserver.repository.ReplayTimeControlRepository;
@@ -25,7 +23,6 @@ import com.szzh.replayserver.service.ReplayControlService;
 import com.szzh.replayserver.service.ReplayFrameMergeService;
 import com.szzh.replayserver.service.ReplayJumpService;
 import com.szzh.replayserver.service.ReplayLifecycleService;
-import com.szzh.replayserver.service.ReplayMetadataService;
 import com.szzh.replayserver.service.ReplayScheduler;
 import com.szzh.replayserver.service.ReplayTableClassifier;
 import com.szzh.replayserver.support.constant.ReplayMessageConstants;
@@ -76,15 +73,12 @@ class ReplayFlowIntegrationTest {
 
         ReplaySession session = fixture.sessionManager.requireSession("instance-001");
         Assertions.assertEquals(ReplaySessionState.READY, session.getState());
-        Mockito.verify(fixture.subscriptionManager).subscribe("instance-001");
-        Assertions.assertEquals(1, fixture.sender.recordsByTopic(
+        Assertions.assertNull(session.getBroadcastConsumerHandle());
+        Assertions.assertEquals(0, fixture.sender.recordsByTopic(
                 TopicConstants.buildInstanceBroadcastTopic("instance-001")).size());
-        ProtocolData metadataProtocol = ProtocolMessageUtil.parseData(fixture.sender.recordsByTopic(
-                TopicConstants.buildInstanceBroadcastTopic("instance-001")).get(0).body);
-        Assertions.assertEquals(fixture.messageConstants.getInstanceMetadataMessageCode(),
-                metadataProtocol.getMessageCode());
 
-        fixture.sendControl(fixture.messageConstants.getInstanceStartMessageCode(), "{}");
+        fixture.controlService.startReplay("instance-001", fixture.controlCommand(
+                fixture.messageConstants.getInstanceStartMessageCode(), "{}"));
         Assertions.assertEquals(ReplaySessionState.RUNNING, session.getState());
         Assertions.assertEquals(1, fixture.scheduler.scheduleCount.get());
 
@@ -93,29 +87,33 @@ class ReplayFlowIntegrationTest {
         Assertions.assertEquals(1_250L, session.getLastDispatchedSimTime());
         Assertions.assertEquals(2L, fixture.metrics.publishedSuccessCount());
 
-        fixture.sendControl(fixture.messageConstants.getInstancePauseMessageCode(), "{}");
+        fixture.controlService.pauseReplay("instance-001", fixture.controlCommand(
+                fixture.messageConstants.getInstancePauseMessageCode(), "{}"));
         Assertions.assertEquals(ReplaySessionState.PAUSED, session.getState());
         Assertions.assertEquals(1, fixture.scheduler.cancelCount.get());
 
-        fixture.sendControl(fixture.messageConstants.getInstanceResumeMessageCode(), "{}");
+        fixture.controlService.resumeReplay("instance-001", fixture.controlCommand(
+                fixture.messageConstants.getInstanceResumeMessageCode(), "{}"));
         Assertions.assertEquals(ReplaySessionState.RUNNING, session.getState());
         Assertions.assertEquals(2, fixture.scheduler.scheduleCount.get());
 
-        fixture.sendControl(fixture.messageConstants.getInstanceRateMessageCode(), "{\"rate\":2.0}");
+        fixture.controlService.updateReplayRate("instance-001", fixture.controlCommand(
+                fixture.messageConstants.getInstanceRateMessageCode(), "{\"rate\":2.0}"));
         Assertions.assertEquals(2.0D, session.getRate(), 0.0001D);
 
-        fixture.sendControl(fixture.messageConstants.getInstanceJumpMessageCode(), "{\"time\":1700}");
+        fixture.controlService.jumpReplay("instance-001", fixture.controlCommand(
+                fixture.messageConstants.getInstanceJumpMessageCode(), "{\"time\":1700}"));
         Assertions.assertEquals(1_700L, session.getLastDispatchedSimTime());
         Assertions.assertEquals(1L, fixture.metrics.jumpCount());
 
-        fixture.sendControl(fixture.messageConstants.getInstanceJumpMessageCode(), "{\"time\":1100}");
+        fixture.controlService.jumpReplay("instance-001", fixture.controlCommand(
+                fixture.messageConstants.getInstanceJumpMessageCode(), "{\"time\":1100}"));
         Assertions.assertEquals(1_100L, session.getLastDispatchedSimTime());
         Assertions.assertEquals(2L, fixture.metrics.jumpCount());
 
         fixture.sendGlobalStop();
 
         Assertions.assertFalse(fixture.sessionManager.getSession("instance-001").isPresent());
-        Mockito.verify(fixture.subscriptionManager).unsubscribe("instance-001");
         Assertions.assertEquals(0L, fixture.metrics.activeSessionCount());
         Assertions.assertEquals(6L, fixture.sender.recordsByTopic(
                 TopicConstants.buildInstanceSituationTopic("instance-001")).size());
@@ -133,13 +131,16 @@ class ReplayFlowIntegrationTest {
 
         fixture.sendGlobalCreate();
         ReplaySession session = fixture.sessionManager.requireSession("instance-001");
-        fixture.sendControl(fixture.messageConstants.getInstanceStartMessageCode(), "{}");
+        fixture.controlService.startReplay("instance-001", fixture.controlCommand(
+                fixture.messageConstants.getInstanceStartMessageCode(), "{}"));
         fixture.wallClock.set(1_250L);
         fixture.scheduler.tick(session);
         int scheduleCountBeforeJump = fixture.scheduler.scheduleCount.get();
 
         fixture.sender.failSituationSend();
-        fixture.sendControl(fixture.messageConstants.getInstanceJumpMessageCode(), "{\"time\":1700}");
+        Assertions.assertThrows(BusinessException.class, () -> fixture.controlService.jumpReplay(
+                "instance-001",
+                fixture.controlCommand(fixture.messageConstants.getInstanceJumpMessageCode(), "{\"time\":1700}")));
 
         Assertions.assertEquals(ReplaySessionState.FAILED, session.getState());
         Assertions.assertEquals(1_250L, session.getLastDispatchedSimTime());
@@ -170,9 +171,6 @@ class ReplayFlowIntegrationTest {
         private final ReplayTableDiscoveryRepository tableDiscoveryRepository =
                 Mockito.mock(ReplayTableDiscoveryRepository.class);
 
-        private final ReplayTopicSubscriptionManager subscriptionManager =
-                Mockito.mock(ReplayTopicSubscriptionManager.class);
-
         private final RecordingSender sender = new RecordingSender();
 
         private final ReplaySituationPublisher situationPublisher =
@@ -189,19 +187,11 @@ class ReplayFlowIntegrationTest {
         private final ReplayControlService controlService =
                 new ReplayControlService(sessionManager, scheduler, jumpService, metrics);
 
-        private final ReplayInstanceBroadcastMessageHandler instanceHandler =
-                new ReplayInstanceBroadcastMessageHandler(messageConstants, controlService);
-
-        private final ReplayMetadataService metadataService =
-                new ReplayMetadataService(sender, messageConstants);
-
         private final ReplayLifecycleService lifecycleService = new ReplayLifecycleService(
                 sessionManager,
                 timeControlRepository,
                 tableDiscoveryRepository,
                 new ReplayTableClassifier(properties),
-                subscriptionManager,
-                metadataService,
                 scheduler);
 
         private final ReplayGlobalBroadcastListener globalListener =
@@ -218,7 +208,6 @@ class ReplayFlowIntegrationTest {
          */
         private Fixture() {
             globalListener.setReplayLifecycleCommandPort(lifecycleService);
-            Mockito.when(subscriptionManager.subscribe("instance-001")).thenReturn(true);
         }
 
         /**
@@ -288,17 +277,6 @@ class ReplayFlowIntegrationTest {
         }
 
         /**
-         * 发送实例控制消息。
-         *
-         * @param messageCode 消息编号。
-         * @param rawJson JSON 载荷。
-         */
-        private void sendControl(int messageCode, String rawJson) {
-            instanceHandler.handle("instance-001", message(TopicConstants.buildInstanceBroadcastTopic("instance-001"),
-                    protocolBody(0, messageConstants.getInstanceControlMessageType(), messageCode, rawJson)));
-        }
-
-        /**
          * 构造测试帧。
          *
          * @param tableDescriptor 表描述。
@@ -344,6 +322,22 @@ class ReplayFlowIntegrationTest {
                     (short) messageType,
                     messageCode,
                     rawJson.getBytes(StandardCharsets.UTF_8));
+        }
+
+        /**
+         * 构造实例控制协议数据。
+         *
+         * @param messageCode 消息编号。
+         * @param rawJson JSON 载荷。
+         * @return 协议数据。
+         */
+        private ProtocolData controlCommand(int messageCode, String rawJson) {
+            ProtocolData protocolData = new ProtocolData();
+            protocolData.setSenderId(0);
+            protocolData.setMessageType(messageConstants.getInstanceControlMessageType());
+            protocolData.setMessageCode(messageCode);
+            protocolData.setRawData(rawJson.getBytes(StandardCharsets.UTF_8));
+            return protocolData;
         }
 
         /**

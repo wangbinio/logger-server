@@ -19,9 +19,9 @@
 ### replay-server
 
 - 独立 Spring Boot 服务，固定订阅 `broadcast-global` 中的回放任务消息。
-- 创建回放任务后动态订阅 `broadcast-{instanceId}`，不消费 `situation-{instanceId}`。
+- 创建回放任务后维护本地回放会话，实例级控制通过 HTTP REST 接口进入，不消费 `situation-{instanceId}`。
 - 读取 TDengine `time_control_{instanceId}` 与 `situation_{instanceId}`，发现态势子表并按配置区分事件表、周期表。
-- 支持回放 `create`、`stop`、`start`、`pause`、`resume`、`rate`、`jump`。
+- 支持通过 `broadcast-global` 创建和停止回放任务，通过 HTTP 启动、暂停、继续、倍速、跳转和查询元信息。
 - 连续回放按 `(lastDispatchedSimTime, currentReplayTime]` 查询并发布，发布成功后推进水位。
 - 时间跳转支持向前事件补偿、向后事件补偿，以及周期表目标时刻前最后一帧补偿。
 - `replay-server.replay.publish.batch-size` 作用于服务层分批发布，连续调度和跳转发布都会在批次边界检查状态。
@@ -63,7 +63,7 @@ logger-platform
 | Topic | logger-server | replay-server |
 | --- | --- | --- |
 | `broadcast-global` | 固定订阅，消费仿真创建与停止消息。 | 固定订阅，消费回放创建与停止消息。 |
-| `broadcast-{instanceId}` | 动态订阅，消费仿真实例控制消息。 | 动态订阅，消费回放实例控制消息。 |
+| `broadcast-{instanceId}` | 动态订阅，消费仿真实例控制消息。 | 不再订阅，回放实例控制改用 HTTP 接口。 |
 | `situation-{instanceId}` | 动态订阅，消费态势并写入 TDengine。 | 只发布回放态势，不订阅消费。 |
 
 同一 Topic 上通过协议 `messageType` 隔离记录和回放语义：
@@ -73,7 +73,20 @@ logger-platform
 | 记录侧全局生命周期 | `0` | `create=0`，`stop=1` |
 | 回放侧全局生命周期 | `1` | `create=0`，`stop=1` |
 | 记录侧实例控制 | `1100` | `start=1`，`pause=5`，`resume=6` |
-| 回放侧实例控制 | `1200` | `start=1`，`pause=2`，`resume=3`，`rate=4`，`jump=5`，`metadata=9` |
+| 回放侧 HTTP 控制内部语义 | `1200` | `start=1`，`pause=2`，`resume=3`，`rate=4`，`jump=5`，历史 `metadata=9` 不再主动发布 |
+
+## 回放 HTTP 接口
+
+回放任务创建和停止仍由 `broadcast-global` 驱动，不提供创建或停止 HTTP 接口。前端在任务创建完成后通过以下接口控制和查询回放实例：
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| `GET` | `/api/replay/instances/{instanceId}` | 查询回放元信息和当前状态。 |
+| `POST` | `/api/replay/instances/{instanceId}/start` | 启动回放。 |
+| `POST` | `/api/replay/instances/{instanceId}/pause` | 暂停回放。 |
+| `POST` | `/api/replay/instances/{instanceId}/resume` | 继续回放。 |
+| `POST` | `/api/replay/instances/{instanceId}/rate` | 调整回放倍率，请求体为 `{"rate":2.0}`。 |
+| `POST` | `/api/replay/instances/{instanceId}/jump` | 跳转回放时间，请求体为 `{"time":1713952800000}`。 |
 
 ## TDengine 数据
 
@@ -248,4 +261,4 @@ java -jar replay-server/target/replay-server-0.2.0.jar --spring.profiles.active=
 
 ## 发布信息
 
-`v0.2` 是记录与回放双服务发布版本，包含 RocketMQ 接入、动态订阅、记录侧 TDengine 写入、控制时间点记录、回放侧 TDengine 查询、连续回放、倍速控制、时间跳转、批量发布控制、记录侧与回放侧控制配置命名统一、平台级 README/ARCHITECTURE 文档，以及默认测试闭环和显式真实环境测试入口。
+`v0.2` 是记录与回放双服务发布版本，包含 RocketMQ 接入、记录侧动态订阅、记录侧 TDengine 写入、控制时间点记录、回放侧 TDengine 查询、HTTP 回放控制与元信息查询、连续回放、倍速控制、时间跳转、批量发布控制、记录侧与回放侧控制配置命名统一、平台级 README/ARCHITECTURE 文档，以及默认测试闭环和显式真实环境测试入口。

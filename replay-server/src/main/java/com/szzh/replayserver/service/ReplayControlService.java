@@ -1,10 +1,10 @@
 package com.szzh.replayserver.service;
 
 import com.szzh.common.protocol.ProtocolData;
-import com.szzh.common.topic.TopicConstants;
 import com.szzh.replayserver.domain.session.ReplaySession;
 import com.szzh.replayserver.domain.session.ReplaySessionManager;
 import com.szzh.replayserver.domain.session.ReplaySessionState;
+import com.szzh.replayserver.model.api.ReplayControlResult;
 import com.szzh.replayserver.model.dto.ReplayJumpPayload;
 import com.szzh.replayserver.model.dto.ReplayRatePayload;
 import com.szzh.replayserver.mq.ReplayControlCommandPort;
@@ -73,10 +73,21 @@ public class ReplayControlService implements ReplayControlCommandPort {
      */
     @Override
     public void handleStart(String instanceId, ProtocolData protocolData) {
+        startReplay(instanceId, protocolData);
+    }
+
+    /**
+     * 启动回放。
+     *
+     * @param instanceId 实例 ID。
+     * @param protocolData 协议数据。
+     * @return 控制结果。
+     */
+    public ReplayControlResult startReplay(String instanceId, ProtocolData protocolData) {
         Optional<ReplaySession> sessionOptional = sessionManager.getSession(instanceId);
         if (!sessionOptional.isPresent()) {
             replayMetrics.recordStateConflict();
-            return;
+            return ReplayControlResult.sessionNotFound();
         }
         ReplaySession session = sessionOptional.get();
         boolean shouldSchedule = false;
@@ -89,6 +100,7 @@ public class ReplayControlService implements ReplayControlCommandPort {
                 shouldSchedule = true;
             } else {
                 replayMetrics.recordStateConflict();
+                return ReplayControlResult.stateConflict(session);
             }
         }
         if (shouldSchedule) {
@@ -97,6 +109,7 @@ public class ReplayControlService implements ReplayControlCommandPort {
 
             logControlResult("replay_start_success", instanceId, protocolData, session);
         }
+        return ReplayControlResult.ok(session);
     }
 
     /**
@@ -107,10 +120,21 @@ public class ReplayControlService implements ReplayControlCommandPort {
      */
     @Override
     public void handlePause(String instanceId, ProtocolData protocolData) {
+        pauseReplay(instanceId, protocolData);
+    }
+
+    /**
+     * 暂停回放。
+     *
+     * @param instanceId 实例 ID。
+     * @param protocolData 协议数据。
+     * @return 控制结果。
+     */
+    public ReplayControlResult pauseReplay(String instanceId, ProtocolData protocolData) {
         Optional<ReplaySession> sessionOptional = sessionManager.getSession(instanceId);
         if (!sessionOptional.isPresent()) {
             replayMetrics.recordStateConflict();
-            return;
+            return ReplayControlResult.sessionNotFound();
         }
         ReplaySession session = sessionOptional.get();
         boolean shouldCancel = false;
@@ -120,14 +144,16 @@ public class ReplayControlService implements ReplayControlCommandPort {
                 shouldCancel = true;
             } else {
                 replayMetrics.recordStateConflict();
+                return ReplayControlResult.stateConflict(session);
             }
         }
         if (shouldCancel) {
-            // 暂停连续回放调度，保留会话和控制订阅。
+            // 暂停连续回放调度，保留会话供后续 HTTP 控制。
             scheduler.cancel(instanceId);
 
             logControlResult("replay_pause_success", instanceId, protocolData, session);
         }
+        return ReplayControlResult.ok(session);
     }
 
     /**
@@ -138,10 +164,21 @@ public class ReplayControlService implements ReplayControlCommandPort {
      */
     @Override
     public void handleResume(String instanceId, ProtocolData protocolData) {
+        resumeReplay(instanceId, protocolData);
+    }
+
+    /**
+     * 继续回放。
+     *
+     * @param instanceId 实例 ID。
+     * @param protocolData 协议数据。
+     * @return 控制结果。
+     */
+    public ReplayControlResult resumeReplay(String instanceId, ProtocolData protocolData) {
         Optional<ReplaySession> sessionOptional = sessionManager.getSession(instanceId);
         if (!sessionOptional.isPresent()) {
             replayMetrics.recordStateConflict();
-            return;
+            return ReplayControlResult.sessionNotFound();
         }
         ReplaySession session = sessionOptional.get();
         boolean shouldSchedule = false;
@@ -151,6 +188,7 @@ public class ReplayControlService implements ReplayControlCommandPort {
                 shouldSchedule = true;
             } else {
                 replayMetrics.recordStateConflict();
+                return ReplayControlResult.stateConflict(session);
             }
         }
         if (shouldSchedule) {
@@ -159,6 +197,7 @@ public class ReplayControlService implements ReplayControlCommandPort {
 
             logControlResult("replay_resume_success", instanceId, protocolData, session);
         }
+        return ReplayControlResult.ok(session);
     }
 
     /**
@@ -169,19 +208,30 @@ public class ReplayControlService implements ReplayControlCommandPort {
      */
     @Override
     public void handleRate(String instanceId, ProtocolData protocolData) {
+        updateReplayRate(instanceId, protocolData);
+    }
+
+    /**
+     * 更新回放倍率。
+     *
+     * @param instanceId 实例 ID。
+     * @param protocolData 协议数据。
+     * @return 控制结果。
+     */
+    public ReplayControlResult updateReplayRate(String instanceId, ProtocolData protocolData) {
         ReplayRatePayload payload;
         try {
             payload = ReplayRatePayload.fromRawData(requireProtocolData(protocolData).getRawData());
         } catch (IllegalArgumentException exception) {
             log.debug("result=replay_rate_payload_invalid instanceId={} reason={}", instanceId, exception.getMessage());
             replayMetrics.recordStateConflict();
-            return;
+            return ReplayControlResult.badRequest(exception.getMessage());
         }
 
         Optional<ReplaySession> sessionOptional = sessionManager.getSession(instanceId);
         if (!sessionOptional.isPresent()) {
             replayMetrics.recordStateConflict();
-            return;
+            return ReplayControlResult.sessionNotFound();
         }
         ReplaySession session = sessionOptional.get();
         synchronized (session) {
@@ -190,8 +240,10 @@ public class ReplayControlService implements ReplayControlCommandPort {
                 session.updateRate(payload.getRate());
 
                 logControlResult("replay_rate_success", instanceId, protocolData, session);
+                return ReplayControlResult.ok(session);
             } else {
                 replayMetrics.recordStateConflict();
+                return ReplayControlResult.stateConflict(session);
             }
         }
     }
@@ -204,25 +256,36 @@ public class ReplayControlService implements ReplayControlCommandPort {
      */
     @Override
     public void handleJump(String instanceId, ProtocolData protocolData) {
+        jumpReplay(instanceId, protocolData);
+    }
+
+    /**
+     * 执行回放时间跳转。
+     *
+     * @param instanceId 实例 ID。
+     * @param protocolData 协议数据。
+     * @return 控制结果。
+     */
+    public ReplayControlResult jumpReplay(String instanceId, ProtocolData protocolData) {
         ReplayJumpPayload payload;
         try {
             payload = ReplayJumpPayload.fromRawData(requireProtocolData(protocolData).getRawData());
         } catch (IllegalArgumentException exception) {
             log.debug("result=replay_jump_payload_invalid instanceId={} reason={}", instanceId, exception.getMessage());
             replayMetrics.recordStateConflict();
-            return;
+            return ReplayControlResult.badRequest(exception.getMessage());
         }
 
         Optional<ReplaySession> sessionOptional = sessionManager.getSession(instanceId);
         if (!sessionOptional.isPresent()) {
             replayMetrics.recordStateConflict();
-            return;
+            return ReplayControlResult.sessionNotFound();
         }
         ReplaySession session = sessionOptional.get();
         boolean wasRunning = session.getState() == ReplaySessionState.RUNNING;
         if (!isJumpAccepted(session.getState())) {
             replayMetrics.recordStateConflict();
-            return;
+            return ReplayControlResult.stateConflict(session);
         }
         if (wasRunning) {
             // 跳转期间暂停连续调度，避免窗口推进和补偿发布并发。
@@ -240,6 +303,7 @@ public class ReplayControlService implements ReplayControlCommandPort {
                 scheduler.schedule(session);
             }
         }
+        return ReplayControlResult.ok(session);
     }
 
     /**
@@ -277,7 +341,7 @@ public class ReplayControlService implements ReplayControlCommandPort {
                                   String instanceId,
                                   ProtocolData protocolData,
                                   ReplaySession session) {
-        log.info("result={} instanceId={} topic={} messageType={} messageCode={} senderId={} currentReplayTime={} lastDispatchedSimTime={} rate={} replayState={}",
-                result, instanceId, TopicConstants.buildInstanceBroadcastTopic(instanceId), protocolData.getMessageType(), protocolData.getMessageCode(), protocolData.getSenderId(), session.getReplayClock().currentTime(), session.getLastDispatchedSimTime(), session.getRate(), session.getState());
+        log.info("result={} instanceId={} topic=- messageType={} messageCode={} senderId={} currentReplayTime={} lastDispatchedSimTime={} rate={} replayState={}",
+                result, instanceId, protocolData.getMessageType(), protocolData.getMessageCode(), protocolData.getSenderId(), session.getReplayClock().currentTime(), session.getLastDispatchedSimTime(), session.getRate(), session.getState());
     }
 }
