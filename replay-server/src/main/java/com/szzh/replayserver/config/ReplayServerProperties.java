@@ -83,11 +83,11 @@ public class ReplayServerProperties {
     @Data
     public static class Global {
 
-        private int messageType = 1;
+        private int messageType = 0;
 
-        private int createMessageCode = 0;
+        private int createMessageCode = 2;
 
-        private int stopMessageCode = 1;
+        private int stopMessageCode = 3;
     }
 
     /**

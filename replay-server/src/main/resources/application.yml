@@ -16,11 +16,11 @@ replay-server:
       # broadcast-global 回放任务管理消息
       global:
         # 类型编号
-        message-type: 1
+        message-type: 0
         # 任务创建
-        create-message-code: 0
+        create-message-code: 2
         # 任务停止
-        stop-message-code: 1
+        stop-message-code: 3
 
       # HTTP 外部接口复用的回放控制指令语义
       control:
