@@ -8,12 +8,25 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.util.StringUtils;
 
 import javax.sql.DataSource;
+import java.util.Locale;
 
 /**
  * 回放侧 TDengine 基础配置。
  */
 @Configuration
 public class ReplayTdengineConfig {
+
+    private static final String JDBC_TAOS_PREFIX = "JDBC:TAOS://";
+
+    private static final String JDBC_TSDB_PREFIX = "JDBC:TSDB://";
+
+    private static final String JDBC_TAOS_RS_PREFIX = "JDBC:TAOS-RS://";
+
+    private static final String JDBC_TAOS_WS_PREFIX = "JDBC:TAOS-WS://";
+
+    private static final String TSDB_DRIVER_CLASS_NAME = "com.taosdata.jdbc.TSDBDriver";
+
+    private static final String RESTFUL_DRIVER_CLASS_NAME = "com.taosdata.jdbc.rs.RestfulDriver";
 
     /**
      * 创建回放侧 TDengine 数据源。
@@ -65,6 +78,46 @@ public class ReplayTdengineConfig {
         }
         if (!StringUtils.hasText(tdengine.getDriverClassName())) {
             throw new IllegalStateException("replay-server.tdengine.driver-class-name 未配置");
+        }
+        validateDriverMatchesJdbcUrl(tdengine);
+    }
+
+    /**
+     * 校验 JDBC URL 协议与驱动类是否匹配。
+     *
+     * @param tdengine TDengine 配置。
+     */
+    private void validateDriverMatchesJdbcUrl(ReplayServerProperties.Tdengine tdengine) {
+        String jdbcUrl = tdengine.getJdbcUrl().trim().toUpperCase(Locale.ENGLISH);
+        String driverClassName = tdengine.getDriverClassName().trim();
+        if (jdbcUrl.startsWith(JDBC_TAOS_RS_PREFIX)) {
+            requireDriverClassName(driverClassName, RESTFUL_DRIVER_CLASS_NAME, "TAOS-RS");
+            return;
+        }
+        if (jdbcUrl.startsWith(JDBC_TAOS_WS_PREFIX)) {
+            throw new IllegalStateException("当前 TDengine JDBC 版本不支持 TAOS-WS，请使用 TAOS-RS");
+        }
+        if (jdbcUrl.startsWith(JDBC_TAOS_PREFIX) || jdbcUrl.startsWith(JDBC_TSDB_PREFIX)) {
+            requireDriverClassName(driverClassName, TSDB_DRIVER_CLASS_NAME, "TAOS");
+            return;
+        }
+        throw new IllegalStateException("不支持的 TDengine JDBC URL: " + tdengine.getJdbcUrl());
+    }
+
+    /**
+     * 校验驱动类名是否为期望值。
+     *
+     * @param actualDriverClassName 实际驱动类名。
+     * @param expectedDriverClassName 期望驱动类名。
+     * @param protocolName 协议名称。
+     */
+    private void requireDriverClassName(String actualDriverClassName,
+                                        String expectedDriverClassName,
+                                        String protocolName) {
+        if (!expectedDriverClassName.equals(actualDriverClassName)) {
+            throw new IllegalStateException("TDengine " + protocolName
+                    + " 连接必须使用驱动 " + expectedDriverClassName
+                    + "，当前配置为 " + actualDriverClassName);
         }
     }
 }

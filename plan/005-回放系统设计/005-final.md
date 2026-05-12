@@ -1072,10 +1072,10 @@ rocketmq:
 
 replay-server:
   tdengine:
-    jdbc-url: jdbc:TAOS-WS://127.0.0.1:6041/logger?timezone=UTC-8&charset=utf-8&varcharAsString=true
+    jdbc-url: jdbc:TAOS-RS://127.0.0.1:6041/logger?timezone=UTC-8&charset=utf-8&varcharAsString=true
     username: root
     password: taosdata
-    driver-class-name: com.taosdata.jdbc.ws.WebSocketDriver
+    driver-class-name: com.taosdata.jdbc.rs.RestfulDriver
     maximum-pool-size: 4
     connection-timeout-ms: 30000
   rocketmq:

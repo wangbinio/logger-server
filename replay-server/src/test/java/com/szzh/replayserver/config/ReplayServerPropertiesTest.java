@@ -28,10 +28,10 @@ class ReplayServerPropertiesTest {
     void shouldUseReplayDefaults() {
         ReplayServerProperties properties = new ReplayServerProperties();
 
-        Assertions.assertEquals("com.taosdata.jdbc.ws.WebSocketDriver",
+        Assertions.assertEquals("com.taosdata.jdbc.rs.RestfulDriver",
                 properties.getTdengine().getDriverClassName());
         Assertions.assertEquals(102400, properties.getProtocol().getMaxPayloadSize());
-        Assertions.assertEquals(1, properties.getProtocol().getMessages().getGlobal().getMessageType());
+        Assertions.assertEquals(0, properties.getProtocol().getMessages().getGlobal().getMessageType());
         Assertions.assertEquals(1200, properties.getProtocol().getMessages().getControl().getMessageType());
         Assertions.assertEquals(9, properties.getProtocol().getMessages().getControl().getMetadataMessageCode());
         Assertions.assertEquals("replay-global-consumer", properties.getRocketmq().getGlobalConsumerGroup());
@@ -72,7 +72,7 @@ class ReplayServerPropertiesTest {
     @Test
     void shouldBindReplayPropertiesFromConfiguration() {
         Map<String, Object> values = new LinkedHashMap<String, Object>();
-        values.put("replay-server.tdengine.jdbc-url", "jdbc:TAOS-WS://example/logger");
+        values.put("replay-server.tdengine.jdbc-url", "jdbc:TAOS-RS://example/logger");
         values.put("replay-server.tdengine.username", "root");
         values.put("replay-server.tdengine.password", "taosdata");
         values.put("replay-server.rocketmq.global-consumer-group", "custom-global");
@@ -88,7 +88,7 @@ class ReplayServerPropertiesTest {
                 .bind("replay-server", Bindable.of(ReplayServerProperties.class))
                 .orElseThrow(IllegalStateException::new);
 
-        Assertions.assertEquals("jdbc:TAOS-WS://example/logger", properties.getTdengine().getJdbcUrl());
+        Assertions.assertEquals("jdbc:TAOS-RS://example/logger", properties.getTdengine().getJdbcUrl());
         Assertions.assertEquals("root", properties.getTdengine().getUsername());
         Assertions.assertEquals("taosdata", properties.getTdengine().getPassword());
         Assertions.assertEquals("custom-global", properties.getRocketmq().getGlobalConsumerGroup());

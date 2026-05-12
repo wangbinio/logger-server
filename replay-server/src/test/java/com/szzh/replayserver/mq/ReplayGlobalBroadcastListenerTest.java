@@ -88,7 +88,7 @@ class ReplayGlobalBroadcastListenerTest {
         ReplayGlobalBroadcastListener listener = new ReplayGlobalBroadcastListener(constants);
         listener.setReplayLifecycleCommandPort(commandPort);
 
-        listener.onMessage(buildMessage(0, constants.getGlobalCreateMessageCode(), new byte[0]));
+        listener.onMessage(buildMessage(999, constants.getGlobalCreateMessageCode(), new byte[0]));
 
         Mockito.verifyNoInteractions(commandPort);
     }

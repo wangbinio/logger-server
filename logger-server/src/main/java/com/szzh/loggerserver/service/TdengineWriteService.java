@@ -5,7 +5,6 @@ import com.szzh.loggerserver.model.dto.SituationRecordCommand;
 import com.szzh.loggerserver.model.dto.TimeControlRecordCommand;
 import com.szzh.common.exception.BusinessException;
 import com.szzh.loggerserver.support.constant.TdengineConstants;
-import com.taosdata.jdbc.ws.TSWSPreparedStatement;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -17,8 +16,10 @@ import javax.sql.DataSource;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
-import java.util.Collections;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 
 /**
@@ -118,7 +119,7 @@ public class TdengineWriteService {
     }
 
     /**
-     * 使用 TaosPrepareStatement 批量写入。
+     * 使用标准 JDBC PreparedStatement 批量写入。
      *
      * @param commands 写入命令集合。
      */
@@ -126,21 +127,13 @@ public class TdengineWriteService {
         if (commands == null || commands.isEmpty()) {
             return;
         }
-        try (Connection connection = dataSource.getConnection();
-             PreparedStatement preparedStatement =
-                     connection.prepareStatement(TdengineConstants.buildInsertStmtSql(commands.get(0).getInstanceId()))) {
-            if (!(preparedStatement instanceof TSWSPreparedStatement)) {
-                throw new IllegalStateException("当前驱动未返回 TSWSPreparedStatement");
+        Map<String, List<SituationRecordCommand>> commandsBySql = groupCommandsBySql(commands);
+        try (Connection connection = dataSource.getConnection()) {
+            for (Map.Entry<String, List<SituationRecordCommand>> entry : commandsBySql.entrySet()) {
+                executeBatch(connection, entry.getKey(), entry.getValue());
             }
-            TSWSPreparedStatement taosPrepareStatement = (TSWSPreparedStatement) preparedStatement;
-            for (SituationRecordCommand command : commands) {
-                SituationRecordCommand validatedCommand = requireCommand(command);
-                applyStmtParameters(taosPrepareStatement, validatedCommand);
-            }
-            taosPrepareStatement.columnDataExecuteBatch();
-            taosPrepareStatement.columnDataCloseBatch();
         } catch (SQLException exception) {
-            throw BusinessException.tdengineWrite("TDengine stmt 批量写入失败", exception);
+            throw BusinessException.tdengineWrite("TDengine 标准 JDBC 批量写入失败", exception);
         }
     }
 
@@ -161,28 +154,63 @@ public class TdengineWriteService {
     }
 
     /**
-     * 设置 stmt 批量写入参数。
+     * 按 SQL 分组写入命令。
      *
-     * @param taosPrepareStatement TDengine 预编译语句。
+     * @param commands 原始写入命令集合。
+     * @return SQL 与命令集合映射。
+     */
+    private Map<String, List<SituationRecordCommand>> groupCommandsBySql(List<SituationRecordCommand> commands) {
+        Map<String, List<SituationRecordCommand>> commandsBySql =
+                new LinkedHashMap<String, List<SituationRecordCommand>>();
+        for (SituationRecordCommand command : commands) {
+            SituationRecordCommand validatedCommand = requireCommand(command);
+            String sql = TdengineConstants.buildInsertUsingSql(
+                    validatedCommand.getInstanceId(),
+                    validatedCommand.getMessageType(),
+                    validatedCommand.getMessageCode(),
+                    validatedCommand.getSenderId());
+            if (!commandsBySql.containsKey(sql)) {
+                commandsBySql.put(sql, new ArrayList<SituationRecordCommand>());
+            }
+            commandsBySql.get(sql).add(validatedCommand);
+        }
+        return commandsBySql;
+    }
+
+    /**
+     * 执行同一 SQL 下的批量写入。
+     *
+     * @param connection 数据库连接。
+     * @param sql 写入 SQL。
+     * @param commands 写入命令集合。
+     * @throws SQLException SQL 异常。
+     */
+    private void executeBatch(Connection connection,
+                              String sql,
+                              List<SituationRecordCommand> commands) throws SQLException {
+        try (PreparedStatement preparedStatement = connection.prepareStatement(sql)) {
+            for (SituationRecordCommand command : commands) {
+                applyBatchParameters(preparedStatement, command);
+                preparedStatement.addBatch();
+            }
+            preparedStatement.executeBatch();
+        }
+    }
+
+    /**
+     * 设置标准 JDBC 批量写入参数。
+     *
+     * @param preparedStatement 预编译语句。
      * @param command 写入命令。
      * @throws SQLException SQL 异常。
      */
-    private void applyStmtParameters(TSWSPreparedStatement taosPrepareStatement,
-                                     SituationRecordCommand command) throws SQLException {
-        taosPrepareStatement.setTableName(TdengineConstants.buildSubTableName(
-                command.getInstanceId(),
-                command.getMessageType(),
-                command.getMessageCode(),
-                command.getSenderId()));
-        taosPrepareStatement.setTagInt(1, command.getSenderId());
-        taosPrepareStatement.setTagInt(2, command.getMessageType());
-        taosPrepareStatement.setTagInt(3, command.getMessageCode());
-        taosPrepareStatement.setTimestamp(1, Collections.singletonList(command.getSimTime()));
-        taosPrepareStatement.setVarbinary(2,
-                Collections.singletonList(command.getRawData()),
-                command.getRawData().length);
-        // WebSocket stmt 批量写入需要先累积列数据，再统一执行。
-        taosPrepareStatement.columnDataAddBatch();
+    private void applyBatchParameters(PreparedStatement preparedStatement,
+                                      SituationRecordCommand command) throws SQLException {
+        preparedStatement.setInt(1, command.getSenderId());
+        preparedStatement.setInt(2, command.getMessageType());
+        preparedStatement.setInt(3, command.getMessageCode());
+        preparedStatement.setLong(4, command.getSimTime());
+        preparedStatement.setBytes(5, command.getRawData());
     }
 
     /**

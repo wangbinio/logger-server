@@ -41,10 +41,12 @@ replay-server:
   replay:
     # 回放数据中的业务事件分类（时间跳转后需要全部加载的时间）
     event-messages:
+      # 示例
       - message-type: 1001
         message-codes: [1, 2, 3]
-      - message-type: 1002
-        message-codes: [8]
+      # 基准模型态势数据-空间包
+      - message-type: 2301
+        message-codes: [3]
     query:
       page-size: 1000
     scheduler:

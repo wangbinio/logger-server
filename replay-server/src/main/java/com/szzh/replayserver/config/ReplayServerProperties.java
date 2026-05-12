@@ -33,7 +33,7 @@ public class ReplayServerProperties {
 
         private String password;
 
-        private String driverClassName = "com.taosdata.jdbc.ws.WebSocketDriver";
+        private String driverClassName = "com.taosdata.jdbc.rs.RestfulDriver";
 
         private int maximumPoolSize = 4;
 

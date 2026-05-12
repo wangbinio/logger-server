@@ -143,26 +143,26 @@
 
 这个设计可以平滑支持后续“加速”和“减速”需求。
 
-#### 决策四：TDengine 采用官方 Java Connector 的 WebSocket 路线
+#### 决策四：TDengine 采用官方 Java Connector 的 RESTful 路线
 
-TDengine 操作不再使用 MyBatis Plus，直接采用官方 `taos-jdbcdriver`，通过 WebSocket 方式连接 `taosAdapter`。
+TDengine 操作不再使用 MyBatis Plus，直接采用官方 `taos-jdbcdriver`，通过 RESTful 方式连接 `taosAdapter`。
 
 选择该方案的原因是：
 
 - 动态建表
 - 动态子表名
 - 大量时间序列写入
-- 官方文档明确支持 Java 通过 `jdbc:TAOS-WS://` 建立 WebSocket 连接
-- WebSocket 方式不依赖本地原生客户端库，更适合当前 Spring Boot 服务部署
-- 官方参数绑定写入能力在 WebSocket 路线上可直接使用，且更适合批量写入
+- 生产环境 TDengine 版本较低，已验证 `taos-jdbcdriver 3.2.4`、`jdbc:TAOS-RS://` 与 `com.taosdata.jdbc.rs.RestfulDriver` 可用
+- RESTful 方式不依赖本地原生客户端库，更适合当前 Spring Boot 服务部署
+- 标准 JDBC `PreparedStatement` 批处理足够承载当前记录写入路径，避免依赖高版本 WebSocket 专用接口
 
 因此本项目确定采用以下实现策略：
 
-- 使用官方 Java Connector 连接 TDengine，连接 URL 采用 `jdbc:TAOS-WS://{host}:6041/{db}`
+- 使用官方 Java Connector 连接 TDengine，连接 URL 采用 `jdbc:TAOS-RS://{host}:6041/{db}`
 - Spring 层使用 `spring-boot-starter-jdbc` 管理 `DataSource`
 - 常规 DDL、查询和低频写入使用 `JdbcTemplate` / `PreparedStatement`
-- 高频插入优先采用官方 `stmt` 参数绑定模式
-- 当需要“自动建子表并写入”时，优先使用 WebSocket 扩展接口 `TSWSPreparedStatement`
+- 批量写入使用标准 JDBC batch
+- 数据源启动阶段校验 JDBC URL 协议与 driver-class-name 是否匹配
 
 这样既保留了 Spring 体系内的可维护性，也与 TDengine 官方推荐的连接和写入方式保持一致。
 
@@ -472,10 +472,10 @@ rocketmq:
 
 logger-server:
   tdengine:
-    jdbc-url: jdbc:TAOS-WS://localhost:6041/logger?timezone=UTC-8&charset=utf-8&varcharAsString=true
+    jdbc-url: jdbc:TAOS-RS://localhost:6041/logger?timezone=UTC-8&charset=utf-8&varcharAsString=true
     username: root
     password: taosdata
-    driver-class-name: com.taosdata.jdbc.ws.WebSocketDriver
+    driver-class-name: com.taosdata.jdbc.rs.RestfulDriver
   protocol:
     max-payload-size: 102400
   session:
@@ -593,7 +593,7 @@ logger-server:
 
 原始思路基本可行，但 tags 缺少 `senderId`，且需要明确子表粒度。推荐采用“每实例一个超表，每类消息一个子表”的增强版方案。
 
-在连接与写入实现上，已经确定不使用 MyBatis Plus，而是采用 TDengine 官方 Java Connector 的 WebSocket 路线，并优先使用官方参数绑定写入能力。
+在连接与写入实现上，已经确定不使用 MyBatis Plus，而是采用 TDengine 官方 Java Connector 的 RESTful 路线，并使用标准 JDBC batch 写入能力。
 
 ### 14.4 如何支持后续加速和减速
 

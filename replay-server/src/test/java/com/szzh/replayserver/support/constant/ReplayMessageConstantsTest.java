@@ -16,9 +16,9 @@ class ReplayMessageConstantsTest {
     void shouldExposeDefaultReplayMessageCodes() {
         ReplayMessageConstants constants = new ReplayMessageConstants(new ReplayServerProperties());
 
-        Assertions.assertEquals(1, constants.getGlobalMessageType());
-        Assertions.assertEquals(0, constants.getGlobalCreateMessageCode());
-        Assertions.assertEquals(1, constants.getGlobalStopMessageCode());
+        Assertions.assertEquals(0, constants.getGlobalMessageType());
+        Assertions.assertEquals(2, constants.getGlobalCreateMessageCode());
+        Assertions.assertEquals(3, constants.getGlobalStopMessageCode());
         Assertions.assertEquals(1200, constants.getInstanceControlMessageType());
         Assertions.assertEquals(1, constants.getInstanceStartMessageCode());
         Assertions.assertEquals(2, constants.getInstancePauseMessageCode());

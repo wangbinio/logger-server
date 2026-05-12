@@ -39,6 +39,19 @@ class ApplicationProfileConfigurationTest {
     }
 
     /**
+     * 验证开发环境 TDengine 连接使用兼容低版本服务端的 RESTful 驱动。
+     */
+    @Test
+    void shouldUseRestfulTdengineConnectionForDevProfile() {
+        Properties properties = loadYaml("application-dev.yml");
+
+        Assertions.assertTrue(properties.getProperty("logger-server.tdengine.jdbc-url")
+                .startsWith("jdbc:TAOS-RS://"));
+        Assertions.assertEquals("com.taosdata.jdbc.rs.RestfulDriver",
+                properties.getProperty("logger-server.tdengine.driver-class-name"));
+    }
+
+    /**
      * 验证记录侧实例控制消息使用 control 节点承载，避免与业务实例标识语义混淆。
      */
     @Test

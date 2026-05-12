@@ -18,7 +18,7 @@ class ReplayTdengineConfigTest {
     @Test
     void shouldCreateTdengineDataSourceFromReplayProperties() {
         ReplayServerProperties properties = new ReplayServerProperties();
-        properties.getTdengine().setJdbcUrl("jdbc:TAOS-WS://127.0.0.1:6041/logger");
+        properties.getTdengine().setJdbcUrl("jdbc:TAOS-RS://127.0.0.1:6041/logger");
         properties.getTdengine().setUsername("root");
         properties.getTdengine().setPassword("taosdata");
         properties.getTdengine().setMaximumPoolSize(3);
@@ -29,7 +29,8 @@ class ReplayTdengineConfigTest {
 
         Assertions.assertTrue(dataSource instanceof HikariDataSource);
         HikariDataSource hikariDataSource = (HikariDataSource) dataSource;
-        Assertions.assertEquals("jdbc:TAOS-WS://127.0.0.1:6041/logger", hikariDataSource.getJdbcUrl());
+        Assertions.assertEquals("jdbc:TAOS-RS://127.0.0.1:6041/logger", hikariDataSource.getJdbcUrl());
+        Assertions.assertEquals("com.taosdata.jdbc.rs.RestfulDriver", hikariDataSource.getDriverClassName());
         Assertions.assertEquals("root", hikariDataSource.getUsername());
         Assertions.assertEquals("taosdata", hikariDataSource.getPassword());
         Assertions.assertEquals(3, hikariDataSource.getMaximumPoolSize());
@@ -45,6 +46,36 @@ class ReplayTdengineConfigTest {
         ReplayTdengineConfig config = new ReplayTdengineConfig();
         ReplayServerProperties properties = new ReplayServerProperties();
         properties.getTdengine().setUsername("root");
+
+        Assertions.assertThrows(IllegalStateException.class, () -> config.tdengineDataSource(properties));
+    }
+
+    /**
+     * 验证 TDengine URL 前缀和驱动类型不匹配时快速失败。
+     */
+    @Test
+    void shouldRejectMismatchedJdbcUrlAndDriver() {
+        ReplayTdengineConfig config = new ReplayTdengineConfig();
+        ReplayServerProperties properties = new ReplayServerProperties();
+        properties.getTdengine().setJdbcUrl("jdbc:TAOS-RS://127.0.0.1:6041/logger");
+        properties.getTdengine().setUsername("root");
+        properties.getTdengine().setPassword("taosdata");
+        properties.getTdengine().setDriverClassName("com.taosdata.jdbc.TSDBDriver");
+
+        Assertions.assertThrows(IllegalStateException.class, () -> config.tdengineDataSource(properties));
+    }
+
+    /**
+     * 验证低版本兼容模式下拒绝 WebSocket JDBC URL。
+     */
+    @Test
+    void shouldRejectWebSocketJdbcUrl() {
+        ReplayTdengineConfig config = new ReplayTdengineConfig();
+        ReplayServerProperties properties = new ReplayServerProperties();
+        properties.getTdengine().setJdbcUrl("jdbc:TAOS-WS://127.0.0.1:6041/logger");
+        properties.getTdengine().setUsername("root");
+        properties.getTdengine().setPassword("taosdata");
+        properties.getTdengine().setDriverClassName("com.taosdata.jdbc.ws.WebSocketDriver");
 
         Assertions.assertThrows(IllegalStateException.class, () -> config.tdengineDataSource(properties));
     }

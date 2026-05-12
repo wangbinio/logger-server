@@ -3,7 +3,6 @@ package com.szzh.loggerserver.service;
 import com.szzh.loggerserver.model.dto.SituationRecordCommand;
 import com.szzh.loggerserver.model.dto.TimeControlRecordCommand;
 import com.szzh.common.exception.BusinessException;
-import com.taosdata.jdbc.ws.TSWSPreparedStatement;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -13,9 +12,8 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import javax.sql.DataSource;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
-import java.util.Arrays;
+import java.sql.SQLException;
 import java.util.Collections;
-import java.util.List;
 
 /**
  * TDengine 写入服务测试。
@@ -145,45 +143,10 @@ class TdengineWriteServiceTest {
     }
 
     /**
-     * 验证批量写入会使用 TSWSPreparedStatement。
+     * 验证批量写入使用标准 JDBC PreparedStatement。
      */
     @Test
-    void shouldWriteBatchByTaosPreparedStatement() throws Exception {
-        JdbcTemplate jdbcTemplate = Mockito.mock(JdbcTemplate.class);
-        DataSource dataSource = Mockito.mock(DataSource.class);
-        Connection connection = Mockito.mock(Connection.class);
-        TSWSPreparedStatement taosPrepareStatement = Mockito.mock(TSWSPreparedStatement.class);
-        TdengineWriteService writeService = new TdengineWriteService(jdbcTemplate, dataSource, 2);
-        SituationRecordCommand command = SituationRecordCommand.builder()
-                .instanceId("instance-001")
-                .senderId(11)
-                .messageType(2100)
-                .messageCode(7)
-                .simTime(123456L)
-                .rawData("payload".getBytes())
-                .build();
-
-        Mockito.when(dataSource.getConnection()).thenReturn(connection);
-        Mockito.when(connection.prepareStatement(Mockito.anyString())).thenReturn(taosPrepareStatement);
-
-        writeService.writeBatchByStmt(Collections.singletonList(command));
-
-        Mockito.verify(taosPrepareStatement).setTableName("situation_2100_7_11_instance_001");
-        Mockito.verify(taosPrepareStatement).setTagInt(1, 11);
-        Mockito.verify(taosPrepareStatement).setTagInt(2, 2100);
-        Mockito.verify(taosPrepareStatement).setTagInt(3, 7);
-        Mockito.verify(taosPrepareStatement).setTimestamp(1, Collections.singletonList(123456L));
-        Mockito.verify(taosPrepareStatement).setVarbinary(2, Arrays.asList(command.getRawData()), command.getRawData().length);
-        Mockito.verify(taosPrepareStatement).columnDataAddBatch();
-        Mockito.verify(taosPrepareStatement).columnDataExecuteBatch();
-        Mockito.verify(taosPrepareStatement).columnDataCloseBatch();
-    }
-
-    /**
-     * 验证批量写入遇到非 TSWSPreparedStatement 时会失败。
-     */
-    @Test
-    void shouldRejectNonTaosPrepareStatement() throws Exception {
+    void shouldWriteBatchByStandardPreparedStatement() throws Exception {
         JdbcTemplate jdbcTemplate = Mockito.mock(JdbcTemplate.class);
         DataSource dataSource = Mockito.mock(DataSource.class);
         Connection connection = Mockito.mock(Connection.class);
@@ -201,7 +164,54 @@ class TdengineWriteServiceTest {
         Mockito.when(dataSource.getConnection()).thenReturn(connection);
         Mockito.when(connection.prepareStatement(Mockito.anyString())).thenReturn(preparedStatement);
 
-        Assertions.assertThrows(IllegalStateException.class,
+        writeService.writeBatchByStmt(Collections.singletonList(command));
+
+        Mockito.verify(connection).prepareStatement(
+                "INSERT INTO situation_2100_7_11_instance_001 USING situation_instance_001 TAGS (?, ?, ?) VALUES (NOW, ?, ?)");
+        Mockito.verify(preparedStatement).setInt(1, 11);
+        Mockito.verify(preparedStatement).setInt(2, 2100);
+        Mockito.verify(preparedStatement).setInt(3, 7);
+        Mockito.verify(preparedStatement).setLong(4, 123456L);
+        Mockito.verify(preparedStatement).setBytes(5, command.getRawData());
+        Mockito.verify(preparedStatement).addBatch();
+        Mockito.verify(preparedStatement).executeBatch();
+    }
+
+    /**
+     * 验证空批量写入不会申请数据库连接。
+     */
+    @Test
+    void shouldIgnoreEmptyBatch() throws Exception {
+        JdbcTemplate jdbcTemplate = Mockito.mock(JdbcTemplate.class);
+        DataSource dataSource = Mockito.mock(DataSource.class);
+        TdengineWriteService writeService = new TdengineWriteService(jdbcTemplate, dataSource, 2);
+
+        writeService.writeBatchByStmt(Collections.<SituationRecordCommand>emptyList());
+
+        Mockito.verify(dataSource, Mockito.never()).getConnection();
+    }
+
+    /**
+     * 验证批量写入 SQL 异常会包装为 TDengine 写入异常。
+     */
+    @Test
+    void shouldWrapBatchSqlException() throws Exception {
+        JdbcTemplate jdbcTemplate = Mockito.mock(JdbcTemplate.class);
+        DataSource dataSource = Mockito.mock(DataSource.class);
+        TdengineWriteService writeService = new TdengineWriteService(jdbcTemplate, dataSource, 2);
+        SituationRecordCommand command = SituationRecordCommand.builder()
+                .instanceId("instance-001")
+                .senderId(11)
+                .messageType(2100)
+                .messageCode(7)
+                .simTime(123456L)
+                .rawData("payload".getBytes())
+                .build();
+
+        Mockito.when(dataSource.getConnection()).thenThrow(new SQLException("db error"));
+
+        BusinessException exception = Assertions.assertThrows(BusinessException.class,
                 () -> writeService.writeBatchByStmt(Collections.singletonList(command)));
+        Assertions.assertEquals(BusinessException.Category.TDENGINE_WRITE, exception.getCategory());
     }
 }

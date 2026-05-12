@@ -39,7 +39,7 @@
 - Java 8
 - Spring Boot 2.7.12
 - RocketMQ Spring Boot Starter 2.2.3
-- TDengine Java Connector 3.8.0
+- TDengine Java Connector 3.2.4
 - Spring JDBC 与 HikariCP
 - Lombok
 - JUnit 5 与 Mockito
@@ -137,6 +137,8 @@ CREATE TABLE IF NOT EXISTS time_control_{instanceId}
 | `logger-server/src/main/resources/application.yml` | 应用名、默认 profile、日志级别、记录侧协议消息码、会话和写入参数。 |
 | `logger-server/src/main/resources/application-dev.yml` | RocketMQ nameserver、TDengine JDBC、消费者组配置。 |
 
+记录侧 TDengine 使用 `jdbc:TAOS-RS://...:6041/...` 与 `com.taosdata.jdbc.rs.RestfulDriver`，适配生产环境 `taos-jdbcdriver 3.2.4`。
+
 关键配置：
 
 ```yaml
@@ -165,6 +167,8 @@ logger-server:
 | `replay-server/src/main/resources/application-dev.yml` | RocketMQ nameserver、TDengine JDBC、消费者组和生产者组配置。 |
 | `replay-server/src/test/resources/application-test.yml` | 回放侧测试 profile 配置。 |
 | `replay-server/src/test/resources/application-real.yml` | 回放侧真实环境测试补充配置。 |
+
+回放侧 TDengine 同样使用 `jdbc:TAOS-RS://...:6041/...` 与 `com.taosdata.jdbc.rs.RestfulDriver`，不再使用 `jdbc:TAOS-WS`。
 
 关键配置：
 
