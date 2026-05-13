@@ -61,9 +61,9 @@ class ReplayServerPropertiesTest {
         Assertions.assertTrue(properties.getReplay().getEventMessages().get(0).getMessageCodes().contains(1));
         Assertions.assertTrue(properties.getReplay().getEventMessages().get(0).getMessageCodes().contains(2));
         Assertions.assertTrue(properties.getReplay().getEventMessages().get(0).getMessageCodes().contains(3));
-        Assertions.assertEquals(1002, properties.getReplay().getEventMessages().get(1).getMessageType());
+        Assertions.assertEquals(2301, properties.getReplay().getEventMessages().get(1).getMessageType());
         Assertions.assertEquals(1, properties.getReplay().getEventMessages().get(1).getMessageCodes().size());
-        Assertions.assertTrue(properties.getReplay().getEventMessages().get(1).getMessageCodes().contains(8));
+        Assertions.assertTrue(properties.getReplay().getEventMessages().get(1).getMessageCodes().contains(3));
     }
 
     /**

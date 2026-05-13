@@ -14,6 +14,7 @@
 - [x] 更新 replay-server 配置测试，锁定 `TAOS-RS` / `RestfulDriver` 组合。
 - [x] 收敛 Maven 依赖版本使用方式，避免 logger-server 与 replay-server 版本漂移。
 - [x] 运行 replay-server 定向测试与模块回归。
+- [x] 运行 replay-server 真实环境测试，确认低版本 TDengine 和 RocketMQ 全链路可用。
 
 ## 复盘记录
 
@@ -21,7 +22,10 @@
 - `replay-server/src/main/resources/application-dev.yml` 已切换为 `jdbc:TAOS-RS://192.168.233.109:6041/db_satellite_367?...` 与 `com.taosdata.jdbc.rs.RestfulDriver`。
 - `replay-server/src/test/resources/application-test.yml` 与 `ReplayServerProperties` 默认驱动已同步为 `TAOS-RS` / `RestfulDriver` 组合。
 - `ReplayTdengineConfig` 已增加 JDBC URL 与驱动类匹配校验，明确拒绝当前低版本不支持的 `TAOS-WS`。
+- 真实环境验证发现低版本 TDengine / RESTful 驱动组合下 `VARBINARY` 写入读回为空，已将当前态势表 `rawdata` 字段收敛为 `BINARY(8192)`。
 - 已同步 README、ARCHITECTURE 和当前计划定稿文档中的 TDengine Connector 版本和连接方式说明。
 - 定向验证通过：`mvn -pl replay-server -am "-Dtest=ReplayTdengineConfigTest,ReplayServerPropertiesTest" -DfailIfNoTests=false test`。
 - replay-server 模块回归通过：`mvn -pl replay-server -am -DfailIfNoTests=false test`，122 个测试通过，1 个真实环境测试按开关跳过。
+- replay-server 真实环境测试通过：`mvn -pl replay-server -am "-Dtest=ReplayRealEnvironmentTest" "-Dreplay.real-env.test=true" -DfailIfNoTests=false test`，1 个测试通过，0 失败、0 错误、0 跳过。
 - 根工程回归通过：`mvn -DfailIfNoTests=false test`。
+- 真实环境复核通过：再次运行 `mvn -pl replay-server -am "-Dtest=ReplayRealEnvironmentTest" "-Dreplay.real-env.test=true" -DfailIfNoTests=false test`，1 个测试通过，0 失败、0 错误、0 跳过。

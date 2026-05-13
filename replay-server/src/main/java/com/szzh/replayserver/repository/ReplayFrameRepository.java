@@ -4,11 +4,15 @@ import com.szzh.replayserver.model.query.ReplayCursor;
 import com.szzh.replayserver.model.query.ReplayFrame;
 import com.szzh.replayserver.model.query.ReplayTableDescriptor;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.RowMapper;
 import org.springframework.stereotype.Repository;
 
-import java.util.ArrayList;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
+import java.sql.Blob;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 
@@ -90,11 +94,11 @@ public class ReplayFrameRepository {
     public Optional<ReplayFrame> findPeriodicLastFrame(ReplayTableDescriptor tableDescriptor, long targetInclusive) {
         String sql = "SELECT simtime, rawdata FROM " + tableDescriptor.getTableName()
                 + " WHERE simtime <= ? ORDER BY simtime DESC LIMIT 1";
-        List<Map<String, Object>> rows = jdbcTemplate.queryForList(sql, targetInclusive);
-        if (rows.isEmpty()) {
+        List<ReplayFrame> frames = jdbcTemplate.query(sql, createFrameRowMapper(tableDescriptor), targetInclusive);
+        if (frames.isEmpty()) {
             return Optional.empty();
         }
-        return Optional.of(toFrame(tableDescriptor, rows.get(0)));
+        return Optional.of(frames.get(0));
     }
 
     /**
@@ -127,54 +131,80 @@ public class ReplayFrameRepository {
                                           long upperBound,
                                           int limit,
                                           int offset) {
-        List<Map<String, Object>> rows = jdbcTemplate.queryForList(sql, lowerBound, upperBound, limit, offset);
-        List<ReplayFrame> frames = new ArrayList<ReplayFrame>();
-        for (Map<String, Object> row : rows) {
-            frames.add(toFrame(tableDescriptor, row));
-        }
-        return frames;
+        return jdbcTemplate.query(sql, createFrameRowMapper(tableDescriptor), lowerBound, upperBound, limit, offset);
     }
 
     /**
-     * 将查询结果行转换为回放帧。
+     * 创建回放帧结果映射器。
      *
      * @param tableDescriptor 子表描述。
-     * @param row 查询结果行。
-     * @return 回放帧。
+     * @return 回放帧结果映射器。
      */
-    private ReplayFrame toFrame(ReplayTableDescriptor tableDescriptor, Map<String, Object> row) {
-        return new ReplayFrame(
-                tableDescriptor.getTableName(),
-                tableDescriptor.getSenderId(),
-                tableDescriptor.getMessageType(),
-                tableDescriptor.getMessageCode(),
-                toLong(row.get("simtime")),
-                toBytes(row.get("rawdata")));
+    private RowMapper<ReplayFrame> createFrameRowMapper(ReplayTableDescriptor tableDescriptor) {
+        return new RowMapper<ReplayFrame>() {
+            /**
+             * 将 JDBC ResultSet 当前行转换为回放帧。
+             *
+             * @param resultSet 查询结果集。
+             * @param rowNum 行号。
+             * @return 回放帧。
+             * @throws SQLException SQL 异常。
+             */
+            @Override
+            public ReplayFrame mapRow(ResultSet resultSet, int rowNum) throws SQLException {
+                return new ReplayFrame(
+                        tableDescriptor.getTableName(),
+                        tableDescriptor.getSenderId(),
+                        tableDescriptor.getMessageType(),
+                        tableDescriptor.getMessageCode(),
+                        resultSet.getLong("simtime"),
+                        readRawData(resultSet));
+            }
+        };
     }
 
     /**
-     * 转换查询结果为 long。
+     * 从结果集中读取二进制 rawdata。
      *
-     * @param value 查询值。
-     * @return long 值。
+     * @param resultSet 查询结果集。
+     * @return 原始载荷。
+     * @throws SQLException SQL 异常。
      */
-    private long toLong(Object value) {
-        if (value instanceof Number) {
-            return ((Number) value).longValue();
+    private byte[] readRawData(ResultSet resultSet) throws SQLException {
+        byte[] rawData = resultSet.getBytes("rawdata");
+        if (rawData != null) {
+            return rawData;
         }
-        return Long.parseLong(Objects.requireNonNull(value, "simtime 不能为空").toString());
+        return convertRawData(resultSet.getObject("rawdata"));
     }
 
     /**
-     * 转换查询结果为字节数组。
+     * 兼容低版本 RESTful 驱动返回的 rawdata 对象类型。
      *
-     * @param value 查询值。
-     * @return 字节数组。
+     * @param value rawdata 查询值。
+     * @return 原始载荷。
+     * @throws SQLException SQL 异常。
      */
-    private byte[] toBytes(Object value) {
+    private byte[] convertRawData(Object value) throws SQLException {
+        if (value == null) {
+            throw new IllegalStateException("rawdata 不能为空");
+        }
         if (value instanceof byte[]) {
             return (byte[]) value;
         }
-        throw new IllegalStateException("rawdata 必须为 byte[]");
+        if (value instanceof String) {
+            return ((String) value).getBytes(StandardCharsets.UTF_8);
+        }
+        if (value instanceof Blob) {
+            Blob blob = (Blob) value;
+            return blob.getBytes(1L, (int) blob.length());
+        }
+        if (value instanceof ByteBuffer) {
+            ByteBuffer byteBuffer = ((ByteBuffer) value).slice();
+            byte[] bytes = new byte[byteBuffer.remaining()];
+            byteBuffer.get(bytes);
+            return bytes;
+        }
+        throw new IllegalStateException("不支持的 rawdata 类型: " + value.getClass().getName());
     }
 }

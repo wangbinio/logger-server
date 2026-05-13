@@ -21,6 +21,8 @@
 - `application-dev.yml` 已对齐低版本兼容连接方式：`jdbc:TAOS-RS://...` 与 `com.taosdata.jdbc.rs.RestfulDriver`。
 - `TdengineConfig` 增加 JDBC URL 前缀与驱动类匹配校验，避免 `jdbc:TAOS://...:6041` 配 `TSDBDriver` 这类错误组合延迟到运行期才暴露。
 - `TdengineWriteService.writeBatchByStmt(...)` 改为标准 JDBC batch，不再依赖 `TSWSPreparedStatement`。
+- 真实环境验证 replay 读写链路时发现低版本 TDengine / RESTful 驱动组合下 `VARBINARY` 写入读回为空，当前态势表 `rawdata` 字段已收敛为 `BINARY(8192)`。
 - 定向验证通过：`mvn -pl logger-server -am "-Dtest=ApplicationProfileConfigurationTest,TdengineConfigTest,TdengineWriteServiceTest" -DfailIfNoTests=false test`，13 个测试通过。
 - 默认回归通过：`mvn -pl logger-server -am -DfailIfNoTests=false test`，64 个测试通过，2 个真实环境相关测试按开关跳过。
 - 用户已确认 logger-server 在生产同款 TDengine 低版本连接配置下通过真实环境测试。
+- 真实环境复核通过：`mvn -pl logger-server -am "-Dtest=RealEnvironmentFullFlowTest" "-Dlogger.real-env.test=true" -DfailIfNoTests=false test`，1 个测试通过，0 失败、0 错误、0 跳过；测试完成 25 张态势表、总计 275 条记录的 TDengine 落库校验。

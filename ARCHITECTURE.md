@@ -367,7 +367,7 @@ CREATE STABLE IF NOT EXISTS situation_{instanceId}
 (
   ts TIMESTAMP,
   simtime BIGINT,
-  rawdata VARBINARY(8192)
+  rawdata BINARY(8192)
 )
 TAGS (
   sender_id INT,

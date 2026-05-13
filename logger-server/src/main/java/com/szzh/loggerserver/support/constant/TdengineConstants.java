@@ -12,7 +12,7 @@ public final class TdengineConstants {
     public static final String TIME_CONTROL_PREFIX = "time_control_";
 
     public static final String CREATE_STABLE_SQL_TEMPLATE =
-            "CREATE STABLE IF NOT EXISTS %s (ts TIMESTAMP, simtime BIGINT, rawdata VARBINARY(8192)) "
+            "CREATE STABLE IF NOT EXISTS %s (ts TIMESTAMP, simtime BIGINT, rawdata BINARY(8192)) "
                     + "TAGS (sender_id INT, msgtype INT, msgcode INT)";
 
     public static final String INSERT_USING_SQL_TEMPLATE =

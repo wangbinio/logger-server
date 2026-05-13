@@ -25,6 +25,7 @@ class TdengineSchemaServiceTest {
         Mockito.verify(jdbcTemplate).execute(sqlCaptor.capture());
         String sql = sqlCaptor.getValue();
         Assertions.assertTrue(sql.contains("CREATE STABLE IF NOT EXISTS situation_instance_001"));
+        Assertions.assertTrue(sql.contains("rawdata BINARY(8192)"));
         Assertions.assertTrue(sql.contains("sender_id INT"));
         Assertions.assertTrue(sql.contains("msgtype INT"));
         Assertions.assertTrue(sql.contains("msgcode INT"));

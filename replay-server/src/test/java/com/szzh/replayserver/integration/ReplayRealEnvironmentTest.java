@@ -40,6 +40,7 @@ import org.springframework.util.StringUtils;
 import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
 import java.sql.DriverManager;
+import java.sql.PreparedStatement;
 import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -71,7 +72,7 @@ class ReplayRealEnvironmentTest {
     private static final long JUMP_TARGET_SIM_TIME = 2_600L;
 
     private static final String CREATE_STABLE_SQL_TEMPLATE =
-            "CREATE STABLE IF NOT EXISTS %s (ts TIMESTAMP, simtime BIGINT, rawdata VARBINARY(8192)) "
+            "CREATE STABLE IF NOT EXISTS %s (ts TIMESTAMP, simtime BIGINT, rawdata BINARY(8192)) "
                     + "TAGS (sender_id INT, msgtype INT, msgcode INT)";
 
     private static final String CREATE_TIME_CONTROL_TABLE_SQL_TEMPLATE =
@@ -217,7 +218,7 @@ class ReplayRealEnvironmentTest {
 
         // 写入真实态势子表数据，供 ReplayFrameRepository 通过 TDengine 查询后回放。
         ExpectedFrame eventAt1500 = insertReplayFrame(instanceId, 1001, 1, 7, 1_500L);
-        ExpectedFrame eventAt1800 = insertReplayFrame(instanceId, 1002, 8, 4, 1_800L);
+        ExpectedFrame eventAt1800 = insertReplayFrame(instanceId, 2301, 3, 4, 1_800L);
         ExpectedFrame eventAt2500 = insertReplayFrame(instanceId, 1001, 2, 6, 2_500L);
         ExpectedFrame periodicAt2600 = insertReplayFrame(instanceId, 1003, 3, 9, 2_600L);
         insertReplayFrame(instanceId, 1003, 3, 9, 3_000L);
@@ -243,9 +244,18 @@ class ReplayRealEnvironmentTest {
         String tableName = TdengineNaming.buildSubTableName(instanceId, messageType, messageCode, senderId);
         byte[] rawData = ("{\"instanceId\":\"" + instanceId + "\",\"simTime\":" + simTime + "}")
                 .getBytes(StandardCharsets.UTF_8);
-        jdbcTemplate.update("INSERT INTO " + tableName + " USING " + stableName
-                        + " TAGS (?, ?, ?) VALUES (NOW, ?, ?)",
-                senderId, messageType, messageCode, simTime, rawData);
+        String sql = "INSERT INTO " + tableName + " USING " + stableName
+                + " TAGS (?, ?, ?) VALUES (NOW, ?, ?)";
+        // 真实写入链路使用 setBytes，测试造数也保持一致。
+        jdbcTemplate.update(connection -> {
+            PreparedStatement preparedStatement = connection.prepareStatement(sql);
+            preparedStatement.setInt(1, senderId);
+            preparedStatement.setInt(2, messageType);
+            preparedStatement.setInt(3, messageCode);
+            preparedStatement.setLong(4, simTime);
+            preparedStatement.setBytes(5, rawData);
+            return preparedStatement;
+        });
         return new ExpectedFrame(senderId, messageType, messageCode, simTime, rawData);
     }
 
